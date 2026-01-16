@@ -173,9 +173,9 @@ twisty-player { width: 100%; height: 100%; }
 /* TAB (Mobile Only) */
 .mobile-tabs { display: none; }
 
-/* --- 貼在 style.css 最底部，替換原本的 @media (max-width: 900px) --- */
+/* --- 請替換 style.css 最底部的 @media (max-width: 900px) 區塊 --- */
 @media (max-width: 900px) {
-    /* 1. 外層容器：鎖定視窗高度，防止捲動 */
+    /* 1. 外層容器：鎖定視窗高度，防止整個頁面捲動 */
     .app-grid {
         display: flex;
         flex-direction: column;
@@ -196,31 +196,69 @@ twisty-player { width: 100%; height: 100%; }
         overflow: hidden;
     }
 
-    /* 3. 公式區：防止過度壓縮 */
+    /* 3. 公式區：顯示反向公式，並限制高度 */
     .panel-solution {
         flex-shrink: 0;
-        padding: 12px 16px; /* 調整間距 */
+        padding: 10px 16px; /* 稍微減少 Padding */
         z-index: 20;
         width: 100%;
-        min-height: auto;
+        /* [核心修正] 限制最大高度，防止公式太長把按鈕擠出去，超過則捲動 */
+        max-height: 25vh; 
+        overflow-y: auto;
+        border-bottom: 1px solid #333;
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
     }
     
-    /* 公式文字優化 */
     .solution-header { display: none; }
+    
+    /* 主公式文字縮小一點 */
     #solution-text {
-        font-size: 1.4rem;
+        font-size: 1.3rem; 
         margin: 0;
         text-align: left;
+        line-height: 1.3;
+        /* 允許換行，但限制行數 */
+        word-break: break-all;
+    }
+
+    /* [核心修正] 顯示詳細資訊 (反向公式) */
+    .formula-details { 
+        display: flex !important; /* 強制顯示 */
+        flex-direction: column;
+        gap: 4px;
+        margin-top: 8px;
+        padding-top: 6px;
+        border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    /* 詳細資訊改為橫向排列，節省垂直空間 */
+    .detail-row {
+        flex-direction: row;
+        align-items: center;
+        width: 100%;
+        font-size: 11px;
+    }
+    
+    .detail-row .label {
+        color: #888;
+        margin-right: 6px;
+        white-space: nowrap; /* 標籤不換行 */
+    }
+    
+    .detail-row .value {
+        color: #ccc;
+        font-family: var(--font-mono);
         white-space: nowrap;
         overflow: hidden;
-        text-overflow: ellipsis;
+        text-overflow: ellipsis; /* 太長則顯示 ... */
     }
-    .formula-details { display: none; } /* 手機版隱藏詳細資訊以節省空間 */
 
-    /* 4. TAB 分頁系統 (瘦身版) */
+    /* 4. TAB 分頁系統 */
     .mobile-tabs {
         display: flex;
-        flex-shrink: 0; /* 禁止被壓縮 */
+        flex-shrink: 0;
         width: 100%;
         background: #111;
         border-bottom: 1px solid #333;
@@ -229,7 +267,7 @@ twisty-player { width: 100%; height: 100%; }
     
     .tab-btn {
         flex: 1;
-        padding: 8px 0; /* [修正] 縮小 Padding 解決佔位過大問題 */
+        padding: 8px 0;
         background: none;
         border: none;
         color: #666;
@@ -244,13 +282,13 @@ twisty-player { width: 100%; height: 100%; }
         background: rgba(0, 229, 255, 0.05);
     }
 
-    /* 5. 3D 工作區：關鍵的高度傳遞鏈 */
+    /* 5. 3D 工作區：自動縮放 */
     .panel-3d {
-        flex: 1; /* 佔滿剩餘高度 */
+        flex: 1; /* 佔滿剩餘高度 (Solution 變高時這裡會自動變矮) */
         padding: 0;
         display: flex;
         flex-direction: column;
-        min-height: 0;
+        min-height: 0; /* 關鍵：允許被壓縮 */
         background: #000;
         overflow: hidden;
     }
@@ -263,11 +301,12 @@ twisty-player { width: 100%; height: 100%; }
         flex-direction: column;
         height: 100%;
         width: 100%;
+        min-height: 0;
     }
 
     /* 隱藏/顯示控制 */
     .workspace-split {
-        display: none !important; /* 預設隱藏 */
+        display: none !important;
         width: 100%;
         height: 100%;
         border: none;
@@ -275,9 +314,10 @@ twisty-player { width: 100%; height: 100%; }
     }
 
     .workspace-split.active {
-        display: flex !important; /* 啟動時顯示 */
+        display: flex !important;
         flex-direction: column;
         flex: 1;
+        min-height: 0;
     }
 
     /* 右側填色區 */
@@ -286,41 +326,39 @@ twisty-player { width: 100%; height: 100%; }
         overflow: hidden;
     }
     
-    /* [核心修正] Canvas 容器必須佔滿 Flex 空間 */
     #canvas-wrapper {
         flex: 1;
         width: 100%;
-        height: 100%; /* 確保高度 */
+        height: 100%;
         background: radial-gradient(circle at center, #1a1a1a 0%, #000 90%);
         overflow: hidden;
-        position: relative; /* 讓內部絕對定位的 Canvas 參考 */
+        position: relative;
     }
 
     /* 調色盤 */
     .palette-container {
         flex-shrink: 0;
-        padding: 8px;
+        padding: 6px; /* 稍微縮小 padding */
         background: rgba(17,17,17,0.95);
         border-top: 1px solid rgba(255,255,255,0.1);
     }
     .palette-container label { display: none; }
-    .color-swatch { height: 32px; } /* 手機版色塊稍微縮小 */
+    .color-swatch { height: 32px; }
 
     /* 6. 底部控制面板 (沉底) */
     .panel-controls {
         order: 2;
-        flex-shrink: 0;
+        flex-shrink: 0; /* 禁止被壓縮，保證按鈕顯示 */
         padding: 12px;
         padding-bottom: calc(12px + env(safe-area-inset-bottom));
         background: var(--panel-bg);
         border-top: 1px solid var(--panel-border);
         border-right: none;
         width: 100%;
-        max-height: 40vh;
+        max-height: 35vh; /* 限制最大高度 */
         overflow-y: auto;
     }
 
-    /* 簡化控制面板內容 */
     .panel-header, .hint-text, .subtitle, .footer-note { display: none; }
 
     .control-section {
@@ -332,11 +370,11 @@ twisty-player { width: 100%; height: 100%; }
     }
     
     .input-group { flex: 1; }
-    .input-group label { display: none; } /* 極簡模式隱藏標籤 */
+    .input-group label { display: none; }
     
     .action-buttons {
         display: grid;
-        grid-template-columns: 1fr 1fr; /* 改為兩欄或三欄 */
+        grid-template-columns: 1fr 1fr;
         gap: 8px;
         margin-top: 0;
     }
