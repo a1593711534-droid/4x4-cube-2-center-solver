@@ -173,54 +173,177 @@ twisty-player { width: 100%; height: 100%; }
 /* TAB (Mobile Only) */
 .mobile-tabs { display: none; }
 
-/* --- 響應式適配 (iPad & Mobile < 900px) --- */
+/* --- 貼在 style.css 最底部，替換原本的 @media (max-width: 900px) --- */
 @media (max-width: 900px) {
+    /* 1. 外層容器：鎖定視窗高度，防止捲動 */
     .app-grid {
-        display: flex; flex-direction: column; /* 改為單欄 Flex */
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        height: 100dvh; /* 針對移動瀏覽器網址列優化 */
+        width: 100vw;
+        overflow: hidden;
     }
 
-    /* 1. 內容區為主，且要扣除底部控制列的高度 */
+    /* 2. 主操作區：佔據剩餘空間 */
     .main-column {
-        order: 1; flex: 1; height: auto; min-height: 0;
+        order: 1;
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        height: auto;
+        min-height: 0; /* 關鍵：允許 Flex 子項目縮小 */
+        overflow: hidden;
     }
 
-    /* 2. 控制面板沉底 */
-    .panel-controls {
-        order: 2; flex-shrink: 0; width: 100%;
-        border-right: none; border-top: 1px solid var(--panel-border);
-        padding: 12px; padding-bottom: max(12px, env(safe-area-inset-bottom));
-        max-height: 40vh; /* 限制高度，內部可捲動 */
+    /* 3. 公式區：防止過度壓縮 */
+    .panel-solution {
+        flex-shrink: 0;
+        padding: 12px 16px; /* 調整間距 */
+        z-index: 20;
+        width: 100%;
+        min-height: auto;
     }
-    .panel-header, .footer-note, .input-group label { display: none; } /* 簡化介面 */
     
-    /* 橫向排列控制項 */
-    .control-section {
-        flex-direction: row; border: none; padding: 0; margin-bottom: 10px; align-items: center;
+    /* 公式文字優化 */
+    .solution-header { display: none; }
+    #solution-text {
+        font-size: 1.4rem;
+        margin: 0;
+        text-align: left;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
     }
-    .input-group { flex: 1; }
-    .action-buttons { flex-direction: row; margin: 0; }
-    .btn { height: 44px; flex: 1; font-size: 14px; }
+    .formula-details { display: none; } /* 手機版隱藏詳細資訊以節省空間 */
 
-    /* 3. 公式區壓縮 */
-    .panel-solution { padding: 12px; min-height: auto; }
-    #solution-text { font-size: 1.5rem; }
-    .formula-details { display: none; } /* 手機版隱藏詳細統計以省空間 */
-
-    /* 4. TAB 分頁系統啟動 */
+    /* 4. TAB 分頁系統 (瘦身版) */
     .mobile-tabs {
-        display: flex; background: #111; border-bottom: 1px solid #333;
+        display: flex;
+        flex-shrink: 0; /* 禁止被壓縮 */
+        width: 100%;
+        background: #111;
+        border-bottom: 1px solid #333;
+        z-index: 30;
     }
-    .tab-btn {
-        flex: 1; padding: 12px; background: none; border: none; color: #666;
-        border-bottom: 2px solid transparent; transition: 0.2s;
-    }
-    .tab-btn.active { color: var(--accent-color); border-bottom-color: var(--accent-color); }
-
-    /* 5. 工作區全螢幕與切換 */
-    .panel-3d { padding: 0; }
-    .workspace-wrapper { gap: 0; }
-    .workspace-split { display: none !important; border: none; border-radius: 0; }
-    .workspace-split.active { display: flex !important; }
     
-    .pane-label { display: none; }
+    .tab-btn {
+        flex: 1;
+        padding: 8px 0; /* [修正] 縮小 Padding 解決佔位過大問題 */
+        background: none;
+        border: none;
+        color: #666;
+        border-bottom: 2px solid transparent;
+        font-size: 13px;
+        font-family: var(--font-tech);
+        transition: 0.2s;
+    }
+    .tab-btn.active {
+        color: var(--accent-color);
+        border-bottom-color: var(--accent-color);
+        background: rgba(0, 229, 255, 0.05);
+    }
+
+    /* 5. 3D 工作區：關鍵的高度傳遞鏈 */
+    .panel-3d {
+        flex: 1; /* 佔滿剩餘高度 */
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        min-height: 0;
+        background: #000;
+        overflow: hidden;
+    }
+    
+    .viewport-header, .pane-label { display: none; }
+
+    .workspace-wrapper {
+        flex: 1;
+        display: flex;
+        flex-direction: column;
+        height: 100%;
+        width: 100%;
+    }
+
+    /* 隱藏/顯示控制 */
+    .workspace-split {
+        display: none !important; /* 預設隱藏 */
+        width: 100%;
+        height: 100%;
+        border: none;
+        border-radius: 0;
+    }
+
+    .workspace-split.active {
+        display: flex !important; /* 啟動時顯示 */
+        flex-direction: column;
+        flex: 1;
+    }
+
+    /* 右側填色區 */
+    .right-pane { 
+        position: relative;
+        overflow: hidden;
+    }
+    
+    /* [核心修正] Canvas 容器必須佔滿 Flex 空間 */
+    #canvas-wrapper {
+        flex: 1;
+        width: 100%;
+        height: 100%; /* 確保高度 */
+        background: radial-gradient(circle at center, #1a1a1a 0%, #000 90%);
+        overflow: hidden;
+        position: relative; /* 讓內部絕對定位的 Canvas 參考 */
+    }
+
+    /* 調色盤 */
+    .palette-container {
+        flex-shrink: 0;
+        padding: 8px;
+        background: rgba(17,17,17,0.95);
+        border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    .palette-container label { display: none; }
+    .color-swatch { height: 32px; } /* 手機版色塊稍微縮小 */
+
+    /* 6. 底部控制面板 (沉底) */
+    .panel-controls {
+        order: 2;
+        flex-shrink: 0;
+        padding: 12px;
+        padding-bottom: calc(12px + env(safe-area-inset-bottom));
+        background: var(--panel-bg);
+        border-top: 1px solid var(--panel-border);
+        border-right: none;
+        width: 100%;
+        max-height: 40vh;
+        overflow-y: auto;
+    }
+
+    /* 簡化控制面板內容 */
+    .panel-header, .hint-text, .subtitle, .footer-note { display: none; }
+
+    .control-section {
+        flex-direction: row;
+        gap: 8px;
+        padding-bottom: 8px;
+        margin: 0;
+        border: none;
+    }
+    
+    .input-group { flex: 1; }
+    .input-group label { display: none; } /* 極簡模式隱藏標籤 */
+    
+    .action-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr; /* 改為兩欄或三欄 */
+        gap: 8px;
+        margin-top: 0;
+    }
+
+    .btn {
+        height: 42px;
+        font-size: 13px;
+        margin: 0;
+    }
 }

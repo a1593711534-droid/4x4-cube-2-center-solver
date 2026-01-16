@@ -815,7 +815,54 @@ function solveCenters() {
             const anchor = ANCHOR_ROTATIONS[targetFaceVal] || '';
 
             let fullInverseParts = [...invPath, ...invSetup];
-            if (anchor) fullInverseParts.unshift(anchor);
+            if (anchor) {
+                if (fullInverseParts.length > 0) {
+                    const firstMove = fullInverseParts[0];
+                    const axis = anchor.charAt(0); // 取出 x, y, 或 z
+
+                    // 檢查第一步是否為同軸旋轉 (例如 anchor='z', firstMove='z' 或 'z'' 或 'z2')
+                    if (firstMove.startsWith(axis)) {
+                        
+                        // 定義旋轉值的簡單映射
+                        const getVal = (m) => {
+                            if (m.endsWith("2")) return 2;
+                            if (m.endsWith("'")) return -1;
+                            return 1;
+                        };
+
+                        // 計算合併後的旋轉值 (Anchor + FirstMove)
+                        let sum = getVal(anchor) + getVal(firstMove);
+                        
+                        // 正規化結果 (-2, 2 -> '2'; -1, 3 -> "'"; 1, -3 -> ""; 0 -> 抵銷)
+                        // 這裡簡化處理常見狀況
+                        let newSuffix = "";
+                        let shouldRemove = false;
+
+                        if (sum === 0 || sum === 4 || sum === -4) {
+                            shouldRemove = true; // 互相抵銷 (例如 z + z')
+                        } else if (sum === 2 || sum === -2) {
+                            newSuffix = "2"; // (例如 z + z -> z2)
+                        } else if (sum === -1 || sum === 3) {
+                            newSuffix = "'"; // (例如 z2 + z -> z')
+                        } else if (sum === 1 || sum === -3) {
+                            newSuffix = "";  // (例如 z2 + z' -> z)
+                        }
+
+                        if (shouldRemove) {
+                            fullInverseParts.shift(); // 移除原本的第一步，且不加入 Anchor
+                        } else {
+                            // 更新原本的第一步為合併後的結果
+                            fullInverseParts[0] = axis + newSuffix;
+                        }
+                    } else {
+                        // 不同軸，直接插入
+                        fullInverseParts.unshift(anchor);
+                    }
+                } else {
+                    // 陣列為空，直接插入
+                    fullInverseParts.unshift(anchor);
+                }
+            }
             
             let fullInverse = fullInverseParts.join(" ");
             
@@ -956,34 +1003,41 @@ function generateTransforms() {
 /* =========================================================
    UI 互動：手機版分頁切換 (參考另一個專案)
    ========================================================= */
+/* --- 貼在 script.js 最底部，替換原本的 switchMobileTab --- */
 function switchMobileTab(tabName) {
     // 1. 移除按鈕 active 狀態
     const tabs = document.querySelectorAll('.tab-btn');
     tabs.forEach(btn => btn.classList.remove('active'));
 
     // 2. 隱藏所有 Pane
-    document.getElementById('tab-input').classList.remove('active');
-    document.getElementById('tab-preview').classList.remove('active');
+    const tabInput = document.getElementById('tab-input');
+    const tabPreview = document.getElementById('tab-preview');
+    
+    if(tabInput) tabInput.classList.remove('active');
+    if(tabPreview) tabPreview.classList.remove('active');
 
+    // 3. 根據選擇激活對應項目，並強制觸發重繪
     if (tabName === 'input') {
-        // 切換到填色模式
-        tabs[0].classList.add('active');
-        document.getElementById('tab-input').classList.add('active');
-
-        // [重要] 觸發 Resize 事件，確保 Three.js 畫布重新計算尺寸
-        // 因為 display:none 恢復後，canvas 尺寸通常會跑掉
+        if(tabs[0]) tabs[0].classList.add('active');
+        if(tabInput) tabInput.classList.add('active');
+        
+        // [核心修正] 切換回填色模式時，Three.js 的 Canvas 尺寸可能會錯亂
+        // 必須延遲觸發 onResize，等待 CSS Flexbox 完成佈局
         setTimeout(() => {
-            onResize(); 
+            if (typeof onResize === 'function') {
+                onResize(); 
+            }
         }, 50);
-
+        
     } else {
-        // 切換到預覽模式
-        tabs[1].classList.add('active');
-        document.getElementById('tab-preview').classList.add('active');
-
-        // [重要] 觸發 Resize，確保 TwistyPlayer 正確渲染
+        if(tabs[1]) tabs[1].classList.add('active');
+        if(tabPreview) tabPreview.classList.add('active');
+        
+        // 觸發 resize 確保 twisty-player 正確渲染
         setTimeout(() => {
             window.dispatchEvent(new Event('resize'));
         }, 50);
     }
 }
+// 綁定到 window 確保 HTML onclick 找得到
+window.switchMobileTab = switchMobileTab;
