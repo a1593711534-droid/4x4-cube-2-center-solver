@@ -882,19 +882,6 @@ function solveCenters() {
                 
                 player.timestamp = 0;
                 player.play();
-
-                if (player) {
-                player.alg = finalDisplay;
-                player.experimentalSetupAlg = fullInverse;
-                player.timestamp = 0;
-                player.play();
-                
-                // [新增] 手機版/iPad版 自動切換到「動畫預覽」分頁
-                // 檢查條件：螢幕寬度小於 900px (對應 CSS media query)
-                if (window.innerWidth <= 900) {
-                    switchMobileTab('preview');
-                }
-            }
                 
                 // 手機版自動切換到預覽分頁
                 if (window.innerWidth <= 900) {
