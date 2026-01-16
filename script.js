@@ -41,12 +41,13 @@ function init() {
     scene = new THREE.Scene();
     scene.background = null; 
 
-    camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
+    // 先給定一個初始值，避免除以 0 的錯誤，稍後 ResizeObserver 會自動修正
+    camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight || 1, 0.1, 100);
     camera.position.set(0, 0, 12);
     camera.lookAt(0, 0, 0);
 
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    // [修改] 初始先不設定具體大小，交由 onResize 處理
     renderer.setPixelRatio(window.devicePixelRatio);
     
     // [修改] 修正 renderer 的 style 確保絕對定位不跑版
@@ -54,6 +55,9 @@ function init() {
     renderer.domElement.style.top = '0';
     renderer.domElement.style.left = '0';
     renderer.domElement.style.zIndex = '0'; // 確保在 UI 之下
+    // [新增] 強制設定寬高為 100% 避免初始渲染溢出
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
     
     container.appendChild(renderer.domElement);
 
@@ -71,9 +75,18 @@ function init() {
     create4x4Cube();
     initPalette();
     
-    // [新增] 呼叫 resize 確保初始大小正確
+    // [新增] 使用 ResizeObserver 監聽容器大小變化 (解決 iOS Flexbox 延遲問題的核心)
+    const resizeObserver = new ResizeObserver(() => {
+        onResize();
+    });
+    resizeObserver.observe(container);
+
+    // 保留視窗縮放監聽作為備案
     window.addEventListener('resize', onResize);
+    
+    // [新增] 雙重保險：立即執行一次，並在稍後 CSS 穩定後再執行一次
     onResize();
+    setTimeout(onResize, 50);
 
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
 }
@@ -377,9 +390,21 @@ function onResize() {
     const container = document.getElementById('canvas-wrapper');
     if (!container) return; // 安全檢查
     
-    camera.aspect = container.clientWidth / container.clientHeight;
+    const width = container.clientWidth;
+    const height = container.clientHeight;
+
+    // [新增] 防止因為容器被隱藏 (display: none) 導致長寬為 0 而報錯
+    if (width === 0 || height === 0) return;
+
+    camera.aspect = width / height;
     camera.updateProjectionMatrix();
-    renderer.setSize(container.clientWidth, container.clientHeight);
+    
+    renderer.setSize(width, height);
+    
+    // [新增] 確保 Canvas 樣式不會被 Three.js 的行內樣式強行撐大
+    // 雖然 setSize 會設定 width/height 屬性，但 CSS style 優先權更高，確保不溢出
+    renderer.domElement.style.width = '100%';
+    renderer.domElement.style.height = '100%';
 }
 
 function animate(time) {
