@@ -13,27 +13,26 @@
 </head>
 <body>
 
-<div class="app-container">
-    <aside class="sidebar">
-        <div class="header">
-            <h1>4x4 Center Solver</h1>
-            <div class="subtitle">WCA 標準雙中心求解 (白頂/黃底)</div>
+<div class="app-grid">
+    
+    <aside class="panel-controls">
+        <div class="panel-header">
+            <h2>4x4 Center Solver</h2>
+            <div class="subtitle">WCA 雙中心極速求解</div>
         </div>
 
-        <div class="controls">
-            <div class="panel-section info-box">
-                <p>⚠️ 說明：</p>
-                <ul>
-                    <li>請將方塊上的 <strong>4個白色</strong> 與 <strong>4個黃色</strong> 中心填入。</li>
-                    <li>其餘顏色不需填寫。</li>
-                </ul>
+        <div class="control-section">
+            <div class="input-group">
+                <label>⚠️ 填色說明</label>
+                <div class="info-text">
+                    請填入 <strong>4個白色</strong> 與 <strong>4個黃色</strong> 中心，其餘留黑。
+                </div>
             </div>
 
-            <div class="panel-section">
+            <div class="input-group">
                 <label>目標設定 (Target)</label>
-                <div style="display: flex; gap: 10px; align-items: center;">
-                    <span style="font-size: 12px; color: #888;">將白色中心轉至：</span>
-                    <select id="target-face" style="flex: 1; background: #222; color: #fff; border: 1px solid #444; padding: 5px; border-radius: 4px;">
+                <div class="select-wrapper">
+                    <select id="target-face" class="styled-select">
                         <option value="U" selected>U (頂面)</option>
                         <option value="D">D (底面)</option>
                         <option value="F">F (前面)</option>
@@ -43,70 +42,92 @@
                     </select>
                 </div>
             </div>
-
-            <div class="action-buttons">
-                <button class="btn btn-calc" onclick="solveCenters()">
-                    <span>⚡ 開始計算</span>
-                </button>
-                <button class="btn btn-reset" onclick="resetCube()">
-                    <span>↺ 重置顏色</span>
-                </button>
-            </div>
         </div>
 
-        <div class="orientation-guide">
-            當前視角：<span id="view-orientation">U面朝上 / F面朝前</span>
+        <div class="action-buttons">
+            <button class="btn btn-calc" onclick="solveCenters()">
+                <span class="icon">⚡</span> 開始計算
+            </button>
+            <button class="btn btn-reset" onclick="resetCube()">
+                <span class="icon">↺</span> 重置顏色
+            </button>
+        </div>
+        
+        <div class="footer-note">
+            <span id="view-orientation">視角：U面朝上 / F面朝前</span>
         </div>
     </aside>
 
-    <main class="main-view">
-        <div class="solution-bar">
-            <div class="solution-label">CALCULATION RESULT</div>
-            <div id="solution-text" class="solution-content">READY</div>
-            <div id="inverse-solution-text" class="solution-content" style="font-size: 14px; color: #888; margin-top: 5px; font-weight: normal;"></div>
-            <div id="solution-stats" class="solution-stats"></div>
-        </div>
+    <div class="main-column">
+        
+        <section class="panel-solution">
+            <div class="solution-header">
+                <span class="indicator-dot"></span>
+                CALCULATION RESULT
+            </div>
+            <div class="solution-content">
+                <div id="solution-text">READY</div>
+                
+                <div class="formula-details">
+                    <div class="detail-row">
+                        <span class="label">反向 Setup:</span>
+                        <span id="inverse-solution-text" class="value">-</span>
+                    </div>
+                    <div class="detail-row">
+                        <span class="label">統計:</span>
+                        <span id="solution-stats" class="value">-</span>
+                    </div>
+                </div>
+            </div>
+        </section>
 
         <div class="mobile-tabs">
             <button class="tab-btn active" onclick="switchMobileTab('input')">填色模式</button>
             <button class="tab-btn" onclick="switchMobileTab('preview')">動畫預覽</button>
         </div>
 
-        <div class="workspace-wrapper">
-            
-            <div class="workspace-split left-pane" id="tab-preview">
-                <div class="pane-label">SOLUTION PREVIEW</div>
-                <twisty-player 
-                    id="solution-player"
-                    puzzle="4x4x4"
-                    visualization="3D" 
-                    control-panel="bottom-row"
-                    background="none"
-                    hint-facelets="none"
-                    experimental-setup-alg=""
-                    alg="">
-                </twisty-player>
-            </div>
+        <section class="panel-3d">
+            <div class="workspace-wrapper">
+                <div class="workspace-split left-pane" id="tab-preview">
+                    <div class="pane-label">SOLUTION PREVIEW</div>
+                    <twisty-player 
+                        id="solution-player"
+                        puzzle="4x4x4"
+                        visualization="3D" 
+                        control-panel="bottom-row"
+                        background="none"
+                        hint-facelets="none"
+                        experimental-setup-alg=""
+                        alg="">
+                    </twisty-player>
+                </div>
 
-            <div class="workspace-split right-pane active" id="tab-input">
-                <div class="pane-label">INPUT STATE</div>
-                
-                <div id="canvas-container">
-                    <div class="view-controls">
-                        <button class="v-btn" onclick="rotateView(0, -1)">▲</button>
-                        <div class="h-row">
-                            <button class="v-btn" onclick="rotateView(-1, 0)">◀</button>
-                            <button class="v-btn" onclick="rotateView(1, 0)">▶</button>
+                <div class="workspace-split right-pane active" id="tab-input">
+                    <div class="pane-label">INPUT STATE</div>
+                    
+                    <div id="canvas-wrapper">
+                        <div class="rotate-controls">
+                            <div class="rot-row">
+                                <button class="rot-btn" onclick="rotateView(0, -1)">▲</button>
+                            </div>
+                            <div class="rot-row middle">
+                                <button class="rot-btn" onclick="rotateView(-1, 0)">◀</button>
+                                <div class="rot-btn spacer"></div>
+                                <button class="rot-btn" onclick="rotateView(1, 0)">▶</button>
+                            </div>
+                            <div class="rot-row">
+                                <button class="rot-btn" onclick="rotateView(0, 1)">▼</button>
+                            </div>
                         </div>
-                        <button class="v-btn" onclick="rotateView(0, 1)">▼</button>
                     </div>
+
                     <div class="palette-container">
                         <div class="palette-grid" id="palette"></div>
                     </div>
                 </div>
             </div>
-        </div>
-    </main>
+        </section>
+    </div>
 </div>
 
 <script src="script.js"></script>

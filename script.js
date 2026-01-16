@@ -35,27 +35,28 @@ init();
 animate();
 
 function init() {
-    const container = document.getElementById('canvas-container');
+    // [修改] ID 改為 canvas-wrapper 以配合新 CSS
+    const container = document.getElementById('canvas-wrapper');
     
-    // Scene
     scene = new THREE.Scene();
-    // 背景色由 CSS 控制，但在這裡設為 null 保持透明
     scene.background = null; 
 
-    // Camera (修正：改為標準 Z 軸視角，解決操作方向怪異問題)
     camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-    camera.position.set(0, 0, 12); // 將相機擺在正前方
+    camera.position.set(0, 0, 12);
     camera.lookAt(0, 0, 0);
 
-    // Renderer
     renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setSize(container.clientWidth, container.clientHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     
-    // 將 Canvas 加入容器 (CSS 會將其設為 absolute 背景)
+    // [修改] 修正 renderer 的 style 確保絕對定位不跑版
+    renderer.domElement.style.position = 'absolute';
+    renderer.domElement.style.top = '0';
+    renderer.domElement.style.left = '0';
+    renderer.domElement.style.zIndex = '0'; // 確保在 UI 之下
+    
     container.appendChild(renderer.domElement);
 
-    // Lights (光源調整以適配新視角)
     const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambLight);
     
@@ -67,12 +68,13 @@ function init() {
     backLight.position.set(-5, -5, -10);
     scene.add(backLight);
 
-    // Build 4x4 Cube
     create4x4Cube();
-
-    // UI & Events
     initPalette();
+    
+    // [新增] 呼叫 resize 確保初始大小正確
     window.addEventListener('resize', onResize);
+    onResize();
+
     renderer.domElement.addEventListener('pointerdown', onPointerDown);
 }
 
@@ -371,7 +373,10 @@ function resetCube() {
 }
 
 function onResize() {
-    const container = document.getElementById('canvas-container');
+    // [修改] ID 改為 canvas-wrapper
+    const container = document.getElementById('canvas-wrapper');
+    if (!container) return; // 安全檢查
+    
     camera.aspect = container.clientWidth / container.clientHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(container.clientWidth, container.clientHeight);
@@ -815,10 +820,10 @@ function solveCenters() {
             let fullInverse = fullInverseParts.join(" ");
             
             if(outputInv) {
-                outputInv.innerText = `(反向 Setup: ${fullInverse})`;
+                outputInv.innerText = fullInverse;
             }
 
-            stats.innerText = `${stepCount} Moves${prefixStr ? ' (+Setup)' : ''}\nTime: ${duration}ms`;
+            stats.innerText = `${stepCount} Moves${prefixStr ? ' (+Setup)' : ''}|Time: ${duration}ms`;
 
             // --- 整合 TwistyPlayer ---
             if (player) {
@@ -830,6 +835,19 @@ function solveCenters() {
                 
                 player.timestamp = 0;
                 player.play();
+
+                if (player) {
+                player.alg = finalDisplay;
+                player.experimentalSetupAlg = fullInverse;
+                player.timestamp = 0;
+                player.play();
+                
+                // [新增] 手機版/iPad版 自動切換到「動畫預覽」分頁
+                // 檢查條件：螢幕寬度小於 900px (對應 CSS media query)
+                if (window.innerWidth <= 900) {
+                    switchMobileTab('preview');
+                }
+            }
                 
                 // 手機版自動切換到預覽分頁
                 if (window.innerWidth <= 900) {
@@ -953,6 +971,7 @@ function switchMobileTab(tabName) {
         document.getElementById('tab-input').classList.add('active');
 
         // [重要] 觸發 Resize 事件，確保 Three.js 畫布重新計算尺寸
+        // 因為 display:none 恢復後，canvas 尺寸通常會跑掉
         setTimeout(() => {
             onResize(); 
         }, 50);
