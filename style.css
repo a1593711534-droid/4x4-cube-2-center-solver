@@ -385,3 +385,109 @@ twisty-player { width: 100%; height: 100%; }
         margin: 0;
     }
 }
+
+/* --- [新增] 相機掃描樣式 (4x4 適配版) --- */
+.camera-modal {
+    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+    background-color: #000; z-index: 9999;
+    display: flex; flex-direction: column; align-items: center;
+}
+
+.camera-header {
+    width: 100%; padding: 20px; display: flex; justify-content: space-between;
+    align-items: center; background: #111; border-bottom: 1px solid #333;
+}
+
+#face-indicator {
+    color: #fff; font-size: 1.2rem; font-weight: bold; font-family: var(--font-tech);
+}
+
+.close-camera {
+    background: none; border: none; color: #fff; font-size: 2rem; cursor: pointer; padding: 0 10px;
+}
+
+.camera-container {
+    position: relative; width: 100%; flex: 1;
+    display: flex; flex-direction: column; justify-content: center; align-items: center;
+    background: #000;
+}
+
+.video-wrapper {
+    position: relative; width: 90vw; height: 90vw;
+    max-width: 400px; max-height: 400px;
+    overflow: hidden; border-radius: 12px;
+    box-shadow: 0 0 20px rgba(0,0,0,0.5);
+}
+
+#video {
+    width: 100%; height: 100%; object-fit: cover; transform: scaleX(1);
+}
+
+#grid-canvas {
+    position: absolute; top: 0; left: 0; width: 100%; height: 100%; z-index: 10;
+}
+
+.scan-message {
+    margin-top: 20px; color: var(--accent-color);
+    font-family: var(--font-mono); font-size: 14px; text-align: center; min-height: 20px;
+}
+
+#button-container {
+    position: absolute; bottom: 30px; left: 0; width: 100%;
+    display: flex; justify-content: center; gap: 20px; z-index: 20;
+}
+
+.confirm-btn, .retry-btn {
+    padding: 10px 30px; border-radius: 20px; border: none;
+    font-weight: bold; font-size: 16px; cursor: pointer;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.3);
+}
+
+.confirm-btn { background-color: var(--accent-color); color: #000; }
+.retry-btn { background-color: #444; color: #fff; }
+
+/* 懸浮按鈕 */
+.float-scan-btn {
+    display: flex; position: absolute; top: 30px; left: 20px;
+    width: 56px; height: 56px; border-radius: 16px;
+    background: rgba(255, 255, 255, 0.1);
+    backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+    border: 1px solid rgba(255, 255, 255, 0.2);
+    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+    color: #fff; font-size: 24px; align-items: center; justify-content: center;
+    z-index: 100; cursor: pointer; transition: all 0.3s;
+}
+.float-scan-btn:active { transform: scale(0.95); }
+
+/* 如果在手機上，按鈕位置微調 */
+@media (max-width: 900px) {
+    
+}
+
+/* [新增] 禁用選項樣式 */
+.checkbox-group {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    background: #1a1a1a;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #444;
+}
+
+.cb-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 14px;
+    color: #ccc;
+    font-family: var(--font-mono);
+}
+
+.cb-label input[type="checkbox"] {
+    accent-color: var(--accent-color);
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}

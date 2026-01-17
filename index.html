@@ -42,6 +42,24 @@
                     </select>
                 </div>
             </div>
+
+            <div class="input-group">
+                <label>禁用轉動 (Ban Moves)</label>
+                <div class="checkbox-group">
+                    <label class="cb-label">
+                        <input type="checkbox" id="ban-bw"> <span>Bw</span>
+                    </label>
+                    <label class="cb-label">
+                        <input type="checkbox" id="ban-dw"> <span>Dw</span>
+                    </label>
+                    <label class="cb-label">
+                        <input type="checkbox" id="ban-fw"> <span>Fw</span>
+                    </label>
+                    <label class="cb-label">
+                        <input type="checkbox" id="ban-lw"> <span>Lw</span>
+                    </label>
+                </div>
+            </div>
         </div>
 
         <div class="action-buttons">
@@ -106,6 +124,9 @@
                     <div class="pane-label">INPUT STATE</div>
                     
                     <div id="canvas-wrapper">
+                        <button id="mobile-scan-btn" class="float-scan-btn" onclick="startCameraScanFlow()">
+                            📷
+                        </button>
                         <div class="rotate-controls">
                             <div class="rot-row">
                                 <button class="rot-btn" onclick="rotateView(0, -1)">▲</button>
@@ -128,6 +149,23 @@
             </div>
         </section>
     </div>
+</div>
+
+<div id="camera-modal" class="camera-modal" style="display: none;">
+    <div class="camera-header">
+        <div id="face-indicator">準備中...</div>
+        <button class="close-camera" onclick="stopCamera()">×</button>
+    </div>
+    
+    <div id="camera-container" class="camera-container">
+        <div class="video-wrapper">
+            <video id="video" autoplay playsinline></video>
+            <canvas id="grid-canvas"></canvas>
+        </div>
+        <div id="scan-message" class="scan-message">請將方塊對準網格</div>
+    </div>
+    
+    <canvas id="capture-canvas" style="display: none;"></canvas>
 </div>
 
 <script src="script.js"></script>

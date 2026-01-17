@@ -3,7 +3,11 @@
    ========================================================= */
 const PALETTE = [
     { id: 'W', hex: 0xFFFFFF, name: 'White' },
-    { id: 'Y', hex: 0xFFFF00, name: 'Yellow' }
+    { id: 'Y', hex: 0xFFFF00, name: 'Yellow' },
+    { id: 'G', hex: 0x00FF00, name: 'Green' },
+    { id: 'R', hex: 0xFF0000, name: 'Red' },
+    { id: 'B', hex: 0x0000FF, name: 'Blue' },
+    { id: 'O', hex: 0xFFA500, name: 'Orange' }
 ];
 
 // 4x4 共有 24 個中心塊。定義索引映射 (0-23)
@@ -580,6 +584,10 @@ let FACE_TRANSFORMS = null;
 /* =========================================================
    Solver 核心邏輯 (IDA* + 位元狀態壓縮 + TwistyPlayer 整合)
    ========================================================= */
+/* =========================================================
+   Solver 核心邏輯 (IDA* + 位元狀態壓縮 + TwistyPlayer 整合)
+   [修改說明] 已新增過濾 Bw, Dw, Fw, Lw 的功能
+   ========================================================= */
 function solveCenters() {
     // 0. 預先取得 UI 元素以便顯示錯誤訊息
     const output = document.getElementById('solution-text');
@@ -603,22 +611,15 @@ function solveCenters() {
         if (candidates.length === 2) {
             wId = candidates[0]; yId = candidates[1];
         } else {
-            // --- 修改處：移除 alert，改為顯示在介面上 ---
             output.innerText = "錯誤：顏色數量不對";
-            output.style.color = "#FF4444"; // 設定為紅色警告
-            
-            if(outputInv) outputInv.innerText = ""; // 清空第二行文字
-            
-            // 在狀態區顯示詳細資訊
+            output.style.color = "#FF4444"; 
+            if(outputInv) outputInv.innerText = ""; 
             stats.innerText = `請確保兩色各填 4 格\n目前數量: [${counts.join(', ')}]`;
-            
-            // 清空播放器內容
             if (player) {
                 player.alg = "";
                 player.experimentalSetupAlg = "";
             }
             return; // 終止函式
-            // ----------------------------------------
         }
     }
 
@@ -626,6 +627,13 @@ function solveCenters() {
     const targetSelect = document.getElementById('target-face');
     const targetFaceVal = targetSelect ? targetSelect.value : 'U';
     
+    // [新增] 獲取禁用轉動的選項
+    const bannedPrefixes = [];
+    if (document.getElementById('ban-bw') && document.getElementById('ban-bw').checked) bannedPrefixes.push("Bw");
+    if (document.getElementById('ban-dw') && document.getElementById('ban-dw').checked) bannedPrefixes.push("Dw");
+    if (document.getElementById('ban-fw') && document.getElementById('ban-fw').checked) bannedPrefixes.push("Fw");
+    if (document.getElementById('ban-lw') && document.getElementById('ban-lw').checked) bannedPrefixes.push("Lw");
+
     const FACE_MAP = { 'U': 0, 'D': 1, 'F': 2, 'B': 3, 'R': 4, 'L': 5 };
     const OPPOSITE_MAP = { 0: 1, 1: 0, 2: 3, 3: 2, 4: 5, 5: 4 };
 
@@ -636,7 +644,7 @@ function solveCenters() {
     output.innerText = "SCANNING...";
     if(outputInv) outputInv.innerText = "";
     output.style.color = "#FFD60A";
-    stats.innerText = ""; // 清空錯誤訊息或舊數據
+    stats.innerText = ""; 
 
     setTimeout(() => {
         // --- 初始化 PDB ---
@@ -669,7 +677,7 @@ function solveCenters() {
         };
 
         // ---------------------------------------------------------
-        // 定義 24 種起手勢 (保留原始邏輯)
+        // 定義 24 種起手勢
         // ---------------------------------------------------------
         const orientationDefs = [
             { name: "",       moves: [] },
@@ -730,22 +738,41 @@ function solveCenters() {
         };
 
         // ---------------------------------------------------------
-        // [修改] 建立排序後的移動列表 (Preference Sorting)
+        // [修改] 建立過濾與排序後的移動列表
         // ---------------------------------------------------------
         let sortedMoves = [];
-        for (let i = 0; i < 42; i++) sortedMoves.push(i);
         
+        // 遍歷 0-41 所有移動
+        for (let i = 0; i < 42; i++) {
+            const name = MOVE_NAMES[i];
+            let isBanned = false;
+            
+            // 檢查是否被禁用 (比對前綴，例如 "Bw" 會匹配 "Bw", "Bw2", "Bw'")
+            for (const prefix of bannedPrefixes) {
+                if (name.startsWith(prefix)) {
+                    isBanned = true;
+                    break;
+                }
+            }
+            
+            // 如果沒被禁用，才加入清單
+            if (!isBanned) {
+                sortedMoves.push(i);
+            }
+        }
+        
+        // 依照原始偏好邏輯排序 (即時 Bw/Dw 沒被禁用，也排在後面)
         sortedMoves.sort((a, b) => {
             const nameA = MOVE_NAMES[a];
             const nameB = MOVE_NAMES[b];
             
-            // 判斷是否為「不受歡迎」的移動
+            // 判斷是否為「不受歡迎」的移動 (如果被禁用根本不會進來這裡，但邏輯保留無妨)
             const isBadA = nameA.includes("Bw") || nameA.includes("Dw");
             const isBadB = nameB.includes("Bw") || nameB.includes("Dw");
             
-            if (isBadA && !isBadB) return 1;  // A 是壞的，B 是好的 -> A 排後面 (1)
-            if (!isBadA && isBadB) return -1; // A 是好的，B 是壞的 -> A 排前面 (-1)
-            return 0; // 兩者性質相同，保持原始順序 (通常是軸順序)
+            if (isBadA && !isBadB) return 1;  
+            if (!isBadA && isBadB) return -1; 
+            return 0; 
         });
 
         let path = [];
@@ -764,8 +791,8 @@ function solveCenters() {
 
             let min = Infinity;
             
-            // [修改] 使用排序後的 sortedMoves 進行遍歷
-            for (let i = 0; i < 42; i++) {
+            // [修改] 使用過濾後的 sortedMoves 進行遍歷 (長度動態變化)
+            for (let i = 0; i < sortedMoves.length; i++) {
                 const m = sortedMoves[i]; // 取出實際的移動索引
 
                 const currentIsRot = m >= 36;
@@ -791,7 +818,8 @@ function solveCenters() {
         };
 
         let bound = getH(bestStartMaskState);
-        while (!found && bound <= 12) {
+        // 設定最大搜尋深度
+        while (!found && bound <= 14) {
             const t = search(0, bound, bestStartMaskState, -1);
             if (found) break;
             if (t === Infinity) break;
@@ -826,7 +854,6 @@ function solveCenters() {
                 invSetup = prefixStr.split(" ").reverse().map(invertMove);
             }
 
-            // [修正關鍵]: 定義錨點旋轉 (Anchor Rotation)
             const ANCHOR_ROTATIONS = {
                 'U': '',
                 'D': 'x2',
@@ -836,55 +863,43 @@ function solveCenters() {
                 'L': "z'"
             };
             
-            // 取得對應的錨點旋轉
             const anchor = ANCHOR_ROTATIONS[targetFaceVal] || '';
 
             let fullInverseParts = [...invPath, ...invSetup];
             if (anchor) {
                 if (fullInverseParts.length > 0) {
                     const firstMove = fullInverseParts[0];
-                    const axis = anchor.charAt(0); // 取出 x, y, 或 z
+                    const axis = anchor.charAt(0); 
 
-                    // 檢查第一步是否為同軸旋轉 (例如 anchor='z', firstMove='z' 或 'z'' 或 'z2')
                     if (firstMove.startsWith(axis)) {
-                        
-                        // 定義旋轉值的簡單映射
                         const getVal = (m) => {
                             if (m.endsWith("2")) return 2;
                             if (m.endsWith("'")) return -1;
                             return 1;
                         };
-
-                        // 計算合併後的旋轉值 (Anchor + FirstMove)
                         let sum = getVal(anchor) + getVal(firstMove);
-                        
-                        // 正規化結果 (-2, 2 -> '2'; -1, 3 -> "'"; 1, -3 -> ""; 0 -> 抵銷)
-                        // 這裡簡化處理常見狀況
                         let newSuffix = "";
                         let shouldRemove = false;
 
                         if (sum === 0 || sum === 4 || sum === -4) {
-                            shouldRemove = true; // 互相抵銷 (例如 z + z')
+                            shouldRemove = true;
                         } else if (sum === 2 || sum === -2) {
-                            newSuffix = "2"; // (例如 z + z -> z2)
+                            newSuffix = "2";
                         } else if (sum === -1 || sum === 3) {
-                            newSuffix = "'"; // (例如 z2 + z -> z')
+                            newSuffix = "'";
                         } else if (sum === 1 || sum === -3) {
-                            newSuffix = "";  // (例如 z2 + z' -> z)
+                            newSuffix = "";
                         }
 
                         if (shouldRemove) {
-                            fullInverseParts.shift(); // 移除原本的第一步，且不加入 Anchor
+                            fullInverseParts.shift();
                         } else {
-                            // 更新原本的第一步為合併後的結果
                             fullInverseParts[0] = axis + newSuffix;
                         }
                     } else {
-                        // 不同軸，直接插入
                         fullInverseParts.unshift(anchor);
                     }
                 } else {
-                    // 陣列為空，直接插入
                     fullInverseParts.unshift(anchor);
                 }
             }
@@ -897,25 +912,19 @@ function solveCenters() {
 
             stats.innerText = `${stepCount} Moves${prefixStr ? ' (+Setup)' : ''}|Time: ${duration}ms`;
 
-            // --- 整合 TwistyPlayer ---
             if (player) {
-                // 設定解法 (正向)
                 player.alg = finalDisplay;
-                
-                // 設定 Setup (包含修正方位的錨點)
                 player.experimentalSetupAlg = fullInverse;
-                
                 player.timestamp = 0;
                 player.play();
                 
-                // 手機版自動切換到預覽分頁
                 if (window.innerWidth <= 900) {
                     switchMobileTab('preview');
                 }
             }
 
         } else {
-            output.innerText = "無解 (檢查填色)";
+            output.innerText = "無解 (或深度超限)";
             if(outputInv) outputInv.innerText = "";
             output.style.color = "#FF4444";
             stats.innerText = `Nodes: ${totalNodes}`;
@@ -1053,3 +1062,460 @@ function switchMobileTab(tabName) {
 }
 // 綁定到 window 確保 HTML onclick 找得到
 window.switchMobileTab = switchMobileTab;
+
+/* =========================================================
+   [新增] 4x4 相機掃描功能模組 (移植與適配版)
+   ========================================================= */
+
+let stream = null;
+let currentFaceIndex = 0;
+// 掃描順序: U(白) -> F(綠) -> R(紅) -> B(藍) -> L(橘) -> D(黃)
+const SCAN_ORDER = ['U', 'F', 'R', 'B', 'L', 'D'];
+
+const FACE_LABELS = {
+    'U': '掃描頂面 (Up)',
+    'F': '掃描前面 (Front)',
+    'R': '掃描右面 (Right)',
+    'B': '掃描後面 (Back)',
+    'L': '掃描左面 (Left)',
+    'D': '掃描底面 (Down)'
+};
+
+// 周邊提示 (4x4 版) - 邏輯與 3x3 相同
+const ADJACENT_HINTS = {
+    'U': { top: 'B (藍)', right: 'R (紅)', bottom: 'F (綠)', left: 'L (橘)' },
+    'F': { top: 'U (白)', right: 'R (紅)', bottom: 'D (黃)', left: 'L (橘)' },
+    'R': { top: 'U (白)', right: 'B (藍)', bottom: 'D (黃)', left: 'F (綠)' },
+    'B': { top: 'U (白)', right: 'L (橘)', bottom: 'D (黃)', left: 'R (紅)' },
+    'L': { top: 'U (白)', right: 'F (綠)', bottom: 'D (黃)', left: 'B (藍)' },
+    'D': { top: 'F (綠)', right: 'R (紅)', bottom: 'B (藍)', left: 'L (橘)' }
+};
+
+// 顏色映射 (名稱轉 Hex)
+const CAM_COLOR_MAP = {
+    'white': 0xFFFFFF,
+    'yellow': 0xFFFF00,
+    'green': 0x00FF00,
+    'red': 0xFF0000,
+    'orange': 0xFFA500,
+    'blue': 0x0000FF
+};
+
+let animationFrameId = null;
+
+// 1. 啟動掃描流程
+async function startCameraScanFlow() {
+    // 重置 3D 方塊顏色為空色，準備接收新數據
+    resetCube(); 
+    
+    currentFaceIndex = 0;
+    document.getElementById('camera-modal').style.display = 'flex';
+    
+    // 如果是手機，自動切換到 Input 分頁
+    if(window.innerWidth <= 900) switchMobileTab('input');
+
+    await startCamera();
+}
+window.startCameraScanFlow = startCameraScanFlow;
+
+// 2. 啟動相機
+async function startCamera() {
+    const video = document.getElementById('video');
+    const faceIndicator = document.getElementById('face-indicator');
+    const gridCanvas = document.getElementById('grid-canvas');
+    const msg = document.getElementById('scan-message');
+
+    try {
+        if (stream) {
+            stream.getTracks().forEach(track => track.stop());
+        }
+        
+        // 請求後置鏡頭
+        stream = await navigator.mediaDevices.getUserMedia({
+            video: { 
+                facingMode: 'environment', 
+                width: { ideal: 720 }, 
+                height: { ideal: 720 } 
+            }
+        });
+        
+        video.srcObject = stream;
+
+        await new Promise(resolve => {
+            video.onloadedmetadata = () => {
+                gridCanvas.width = video.videoWidth;
+                gridCanvas.height = video.videoHeight;
+                resolve();
+            };
+        });
+
+        // 更新 UI
+        if(currentFaceIndex < SCAN_ORDER.length) {
+            const face = SCAN_ORDER[currentFaceIndex];
+            faceIndicator.innerText = `${currentFaceIndex + 1}/6: ${FACE_LABELS[face]}`;
+            msg.innerText = "請保持方塊穩定...";
+        }
+        
+        drawGrid();
+        startRealTimeDetection();
+
+    } catch (error) {
+        alert('無法啟動相機，請檢查權限或設備。');
+        console.error('Camera error:', error);
+        stopCamera();
+    }
+}
+
+// 3. 關閉相機
+function stopCamera() {
+    if (stream) {
+        stream.getTracks().forEach(track => track.stop());
+        stream = null;
+    }
+    stopRealTimeDetection();
+    document.getElementById('camera-modal').style.display = 'none';
+}
+window.stopCamera = stopCamera;
+
+// 4. 繪製 4x4 網格
+function drawGrid() {
+    const gridCanvas = document.getElementById('grid-canvas');
+    const ctx = gridCanvas.getContext('2d');
+    
+    if (gridCanvas.width < 50) return { startX: 0, startY: 0, cellSize: 0 };
+
+    ctx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+
+    // 計算網格大小 (佔畫面 70% - 4x4 需要比較大的空間)
+    const size = Math.min(gridCanvas.width, gridCanvas.height) * 0.7;
+    const startX = (gridCanvas.width - size) / 2;
+    const startY = (gridCanvas.height - size) / 2;
+    const cellSize = size / 4; // 4x4 的關鍵修改
+
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.8)';
+    ctx.lineWidth = 2;
+
+    ctx.beginPath();
+    // 繪製 5 條線 (4格)
+    for (let i = 0; i <= 4; i++) {
+        // 橫線
+        ctx.moveTo(startX, startY + i * cellSize);
+        ctx.lineTo(startX + size, startY + i * cellSize);
+        // 直線
+        ctx.moveTo(startX + i * cellSize, startY);
+        ctx.lineTo(startX + i * cellSize, startY + size);
+    }
+    ctx.stroke();
+
+    // 繪製文字提示
+    if (currentFaceIndex < SCAN_ORDER.length) {
+        const faceChar = SCAN_ORDER[currentFaceIndex];
+        const hints = ADJACENT_HINTS[faceChar];
+
+        if (hints) {
+            ctx.font = 'bold 24px "JetBrains Mono", monospace';
+            ctx.fillStyle = '#FFD60A';
+            ctx.textBaseline = 'middle';
+            ctx.shadowColor = 'rgba(0,0,0,0.8)';
+            ctx.shadowBlur = 4;
+
+            ctx.textAlign = 'center';
+            ctx.fillText(hints.top, startX + size / 2, startY - 25);
+            ctx.fillText(hints.bottom, startX + size / 2, startY + size + 25);
+
+            ctx.textAlign = 'right';
+            ctx.fillText(hints.left, startX - 15, startY + size / 2);
+
+            ctx.textAlign = 'left';
+            ctx.fillText(hints.right, startX + size + 15, startY + size / 2);
+        }
+    }
+
+    return { startX, startY, cellSize };
+}
+
+// 5. HSV 轉換
+function rgbToHsv(r, g, b) {
+    r /= 255, g /= 255, b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    const d = max - min;
+    let h, s = max === 0 ? 0 : d / max, v = max;
+    if (max === min) h = 0;
+    else {
+        switch (max) {
+            case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+            case g: h = (b - r) / d + 2; break;
+            case b: h = (r - g) / d + 4; break;
+        }
+        h /= 6;
+    }
+    return [h * 360, s * 100, v * 100];
+}
+
+// 6. 顏色判定 (使用寬容度較高的範圍)
+function detectColor(r, g, b) {
+    const [h, s, v] = rgbToHsv(r, g, b);
+    
+    const colorRanges = {
+        'orange': { h: [5, 25], s: [20, 100], v: [30, 100] },
+        'red': { h: [350, 5], s: [40, 100], v: [20, 100] },
+        'yellow': { h: [50, 70], s: [50, 100], v: [60, 100] }, 
+        'green': { h: [100, 150], s: [40, 100], v: [30, 100] },
+        'blue': { h: [210, 270], s: [50, 100], v: [30, 100] },
+        'white': { h: [0, 360], s: [0, 25], v: [50, 100] } 
+    };
+
+    for (const [color, range] of Object.entries(colorRanges)) {
+        let hInRange;
+        if (color === 'red') {
+            hInRange = (h >= range.h[0] && h <= 360) || (h >= 0 && h <= range.h[1]);
+        } else {
+            hInRange = h >= range.h[0] && h <= range.h[1];
+        }
+        
+        if (hInRange && s >= range.s[0] && s <= range.s[1] && v >= range.v[0] && v <= range.v[1]) {
+            return color;
+        }
+    }
+    return 'white';
+}
+
+// 7. 即時偵測 (4x4 核心邏輯)
+function startRealTimeDetection() {
+    const video = document.getElementById('video');
+    const gridCanvas = document.getElementById('grid-canvas');
+    const ctx = gridCanvas.getContext('2d');
+    const msg = document.getElementById('scan-message');
+    const captureCanvas = document.getElementById('capture-canvas');
+    const capCtx = captureCanvas.getContext('2d');
+
+    let frameCount = 0;
+    const requiredFrames = 20; // 穩定鎖定幀數
+    let lastColors = null;
+
+    function detectAndDraw() {
+        if (!video.srcObject || gridCanvas.width < 50) return;
+
+        if (captureCanvas.width !== video.videoWidth) {
+            captureCanvas.width = video.videoWidth;
+            captureCanvas.height = video.videoHeight;
+        }
+
+        capCtx.drawImage(video, 0, 0);
+        
+        const { startX, startY, cellSize } = drawGrid();
+        
+        const currentFrameColors = [];
+        let isAllWhite = true;
+
+        // 掃描 4x4 = 16格
+        for (let y = 0; y < 4; y++) {
+            for (let x = 0; x < 4; x++) {
+                // 中心採樣
+                const sampleX = startX + x * cellSize + cellSize * 0.25;
+                const sampleY = startY + y * cellSize + cellSize * 0.25;
+                const sampleW = cellSize * 0.5;
+                
+                const pixelData = capCtx.getImageData(sampleX, sampleY, sampleW, sampleW);
+                let rSum = 0, gSum = 0, bSum = 0;
+                
+                for (let i = 0; i < pixelData.data.length; i += 4) {
+                    rSum += pixelData.data[i];
+                    gSum += pixelData.data[i+1];
+                    bSum += pixelData.data[i+2];
+                }
+                
+                const count = pixelData.data.length / 4;
+                const colorName = detectColor(rSum/count, gSum/count, bSum/count);
+                currentFrameColors.push(colorName);
+
+                if (colorName !== 'white') isAllWhite = false;
+
+                // 繪製即時回饋框
+                ctx.lineWidth = 4;
+                ctx.strokeStyle = colorName === 'white' ? '#ddd' : colorName;
+                ctx.strokeRect(startX + x * cellSize, startY + y * cellSize, cellSize, cellSize);
+            }
+        }
+
+        // 防抖邏輯
+        if (lastColors && currentFrameColors.every((c, i) => c === lastColors[i])) {
+            frameCount++;
+            if (frameCount > 5) {
+                msg.innerText = `鎖定中... ${(frameCount/requiredFrames*100).toFixed(0)}%`;
+            }
+            if (frameCount >= requiredFrames && !isAllWhite) {
+                cancelAnimationFrame(animationFrameId);
+                showConfirmationButtons(currentFrameColors);
+                msg.innerText = "已鎖定！請確認";
+                return;
+            }
+        } else {
+            frameCount = 0;
+            lastColors = [...currentFrameColors];
+            msg.innerText = "請保持方塊穩定...";
+            const oldBtns = document.getElementById('button-container');
+            if(oldBtns) oldBtns.remove();
+        }
+
+        animationFrameId = requestAnimationFrame(detectAndDraw);
+    }
+
+    animationFrameId = requestAnimationFrame(detectAndDraw);
+}
+
+function stopRealTimeDetection() {
+    if (animationFrameId) cancelAnimationFrame(animationFrameId);
+    const oldBtns = document.getElementById('button-container');
+    if(oldBtns) oldBtns.remove();
+}
+
+function showConfirmationButtons(colors) {
+    const container = document.getElementById('camera-container');
+    if(document.getElementById('button-container')) return;
+
+    const btnDiv = document.createElement('div');
+    btnDiv.id = 'button-container';
+    
+    const btnConfirm = document.createElement('button');
+    btnConfirm.className = 'confirm-btn';
+    btnConfirm.innerText = '✅ 確認';
+    btnConfirm.onclick = () => processCapturedColors(colors);
+
+    const btnRetry = document.createElement('button');
+    btnRetry.className = 'retry-btn';
+    btnRetry.innerText = '↺ 重試';
+    btnRetry.onclick = () => {
+        btnDiv.remove();
+        startRealTimeDetection();
+    };
+
+    btnDiv.appendChild(btnRetry);
+    btnDiv.appendChild(btnConfirm);
+    container.appendChild(btnDiv);
+}
+
+// 8. 處理顏色並應用到 4x4 魔方
+function processCapturedColors(colorNames) {
+    const targetFace = SCAN_ORDER[currentFaceIndex];
+    const hexColors = colorNames.map(name => CAM_COLOR_MAP[name] || 0x282828);
+    
+    // 呼叫 4x4 專用填色函式
+    applyColorsTo4x4Face(targetFace, hexColors);
+    
+    currentFaceIndex++;
+    document.getElementById('button-container').remove();
+
+    if (currentFaceIndex < SCAN_ORDER.length) {
+        const faceIndicator = document.getElementById('face-indicator');
+        const face = SCAN_ORDER[currentFaceIndex];
+        faceIndicator.innerText = `${currentFaceIndex + 1}/6: ${FACE_LABELS[face]}`;
+        startRealTimeDetection();
+    } else {
+        stopCamera();
+        alert('掃描完成！準備計算...');
+        solveCenters(); // 自動開始計算
+    }
+}
+
+// 9. [核心] 將 16 個顏色映射到 4x4 面的 Mesh，並識別中心塊更新 State
+function applyColorsTo4x4Face(faceChar, hexArray) {
+    // hexArray 順序 (Row-Major): 0-3 (Row1), 4-7 (Row2), 8-11 (Row3), 12-15 (Row4)
+    
+    // 找出該面的所有 Meshes
+    let faceMeshes = [];
+    cubeGroup.children.forEach(mesh => {
+        const { x, y, z } = mesh.userData;
+        
+        let isFace = false;
+        // 4x4 座標系統範圍約 -1.5 到 1.5
+        // 誤差容許 (因為浮點數)
+        if (faceChar === 'U' && Math.abs(y - 1.5) < 0.1) isFace = true;
+        if (faceChar === 'D' && Math.abs(y + 1.5) < 0.1) isFace = true;
+        if (faceChar === 'R' && Math.abs(x - 1.5) < 0.1) isFace = true;
+        if (faceChar === 'L' && Math.abs(x + 1.5) < 0.1) isFace = true;
+        if (faceChar === 'F' && Math.abs(z - 1.5) < 0.1) isFace = true;
+        if (faceChar === 'B' && Math.abs(z + 1.5) < 0.1) isFace = true;
+        
+        if (isFace) faceMeshes.push(mesh);
+    });
+
+    // 排序 Meshes 以匹配掃描順序 (Row-Major: 左上 -> 右下)
+    faceMeshes.sort((a, b) => {
+        const ad = a.userData;
+        const bd = b.userData;
+        
+        if (faceChar === 'U') { 
+            // 上面: 後->前 (Z: -1.5 -> 1.5), 左->右 (X: -1.5 -> 1.5)
+            // 標準掃描順序通常是從「背對你的那排」開始，還是「靠近你的那排」？
+            // 參考 3x3 邏輯：Row 1 是 Z最小(Back)，Row 4 是 Z最大(Front)
+            if (Math.abs(ad.z - bd.z) > 0.1) return ad.z - bd.z;
+            return ad.x - bd.x;
+        }
+        if (faceChar === 'F') {
+            // 正面: 上->下 (Y: 1.5 -> -1.5), 左->右 (X: -1.5 -> 1.5)
+            if (Math.abs(ad.y - bd.y) > 0.1) return bd.y - ad.y;
+            return ad.x - bd.x;
+        }
+        if (faceChar === 'R') {
+            // 右面: 上->下, 前->後 (Z: 1.5 -> -1.5)
+            if (Math.abs(ad.y - bd.y) > 0.1) return bd.y - ad.y;
+            return bd.z - ad.z;
+        }
+        if (faceChar === 'B') {
+            // 背面: 上->下, 右->左 (X: 1.5 -> -1.5，因為背面視角X反向)
+            if (Math.abs(ad.y - bd.y) > 0.1) return bd.y - ad.y;
+            return bd.x - ad.x;
+        }
+        if (faceChar === 'L') {
+            // 左面: 上->下, 後->前 (Z: -1.5 -> 1.5)
+            if (Math.abs(ad.y - bd.y) > 0.1) return bd.y - ad.y;
+            return ad.z - bd.z;
+        }
+        if (faceChar === 'D') {
+            // 底面: 前->後 (Z: 1.5 -> -1.5), 左->右 (X: -1.5 -> 1.5)
+            // 底面翻上來看時，上方通常是 Front
+            if (Math.abs(ad.z - bd.z) > 0.1) return bd.z - ad.z;
+            return ad.x - bd.x;
+        }
+        return 0;
+    });
+
+    // 填色並更新 State
+    faceMeshes.forEach((mesh, index) => {
+        if (index >= 16) return;
+        
+        // 找到對應面的 Material Index
+        let matIdx = -1;
+        if (faceChar === 'R') matIdx = 0;
+        if (faceChar === 'L') matIdx = 1;
+        if (faceChar === 'U') matIdx = 2;
+        if (faceChar === 'D') matIdx = 3;
+        if (faceChar === 'F') matIdx = 4;
+        if (faceChar === 'B') matIdx = 5;
+        
+        const hex = hexArray[index];
+        if (matIdx !== -1) {
+            // 設定視覺顏色
+            mesh.material[matIdx].color.setHex(hex);
+        }
+
+        // [關鍵] 判斷這塊是否為中心塊，若是則更新 cubeState
+        // 4x4 網格中，中心塊的 Index 為：5, 6, 9, 10
+        // Row 0: 0 1 2 3
+        // Row 1: 4 5 6 7
+        // Row 2: 8 9 10 11
+        // Row 3: 12 13 14 15
+        const isCenterIndex = [5, 6, 9, 10].includes(index);
+        
+        if (isCenterIndex && mesh.userData.isCenter) {
+            // 找出對應的 Palette Index (0-5)
+            const paletteIdx = PALETTE.findIndex(p => p.hex === hex);
+            const stateIdx = mesh.userData.index; // 這是 create4x4Cube 裡算好的 0-23 索引
+            
+            if (stateIdx !== -1 && paletteIdx !== -1) {
+                cubeState[stateIdx] = paletteIdx;
+            }
+        }
+    });
+}
