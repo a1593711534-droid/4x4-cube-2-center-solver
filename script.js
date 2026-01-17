@@ -588,45 +588,61 @@ let FACE_TRANSFORMS = null;
    Solver 核心邏輯 (IDA* + 位元狀態壓縮 + TwistyPlayer 整合)
    [修改說明] 已新增過濾 Bw, Dw, Fw, Lw 的功能
    ========================================================= */
+/* =========================================================
+   極速 Solver 模組 (Bitwise IDA* + Transposition Table)
+   [優化] 解決禁用移動後路徑搜尋過久的問題
+   ========================================================= */
+
+// 預先計算好的位元置換表 (Lazy Loading)
+let BIT_PERM_TABLE = null;
+
 function solveCenters() {
-    // 0. 預先取得 UI 元素
+    // 0. UI 元素與初始化
     const output = document.getElementById('solution-text');
     const outputInv = document.getElementById('inverse-solution-text');
     const stats = document.getElementById('solution-stats');
     const player = document.getElementById('solution-player');
+    const startTime = performance.now();
 
-    // 1. 驗證輸入與顏色偵測
+    // 1. 顏色驗證與 ID 識別
+    const counts = [0, 0, 0, 0, 0, 0];
+    cubeState.forEach(c => { if (c !== -1) counts[c]++; });
+
     let wId = -1, yId = -1;
-    const counts = [0,0,0,0,0,0];
-    cubeState.forEach(c => { if(c!==-1) counts[c]++; });
-    
-    // 檢查是否標準白黃 (各4格)
-    if (counts[0] === 4 && counts[1] === 4) {
-        wId = 0; yId = 1;
+    // 尋找數量為 4 的兩個顏色
+    const candidates = [];
+    counts.forEach((cnt, colId) => { if (cnt === 4) candidates.push(colId); });
+
+    if (candidates.length === 2) {
+        wId = candidates[0]; yId = candidates[1];
     } else {
-        const candidates = [];
-        counts.forEach((cnt, colId) => { if (cnt === 4) candidates.push(colId); });
-        
-        if (candidates.length === 2) {
-            wId = candidates[0]; yId = candidates[1];
-        } else {
-            output.innerText = "錯誤：顏色數量不對";
-            output.style.color = "#FF4444"; 
-            if(outputInv) outputInv.innerText = ""; 
-            stats.innerText = `請確保兩色各填 4 格\n目前數量: [${counts.join(', ')}]`;
-            if (player) {
-                player.alg = "";
-                player.experimentalSetupAlg = "";
-            }
-            return;
+        output.innerText = "Error";
+        stats.innerText = `需兩色各 4 格\n目前: [${counts.join(',')}]`;
+        output.style.color = "#FF4444";
+        return;
+    }
+
+    // 2. 準備 PDB 與 加速表
+    if (!PDB_TABLE) initPDB();
+    
+    // [優化] 建立位元置換表 (僅第一次執行時建立)
+    // 這將 PERM_TABLE 轉換為位元遮罩操作所需的數據結構，避免迴圈內的陣列存取
+    if (!BIT_PERM_TABLE) {
+        BIT_PERM_TABLE = new Array(36); // 只處理 0-35 的移動
+        for (let m = 0; m < 36; m++) {
+            const p = PERM_TABLE[m];
+            const map = new Int32Array(24);
+            // map[i] 存儲來源位置：即要把第 p[i] 位的值搬到第 i 位
+            // 在位元運算中：若 (oldMask >> p[i]) & 1，則 newMask |= (1 << i)
+            for(let i=0; i<24; i++) map[i] = p[i];
+            BIT_PERM_TABLE[m] = map;
         }
     }
 
-    // 2. 獲取使用者設定
+    // 3. 獲取使用者設定 (Target & Bans)
     const targetSelect = document.getElementById('target-face');
     const targetFaceVal = targetSelect ? targetSelect.value : 'U';
     
-    // [關鍵] 獲取禁用轉動的選項
     const bannedPrefixes = [];
     if (document.getElementById('ban-bw')?.checked) bannedPrefixes.push("Bw");
     if (document.getElementById('ban-dw')?.checked) bannedPrefixes.push("Dw");
@@ -635,286 +651,238 @@ function solveCenters() {
 
     const FACE_MAP = { 'U': 0, 'D': 1, 'F': 2, 'B': 3, 'R': 4, 'L': 5 };
     const OPPOSITE_MAP = { 0: 1, 1: 0, 2: 3, 3: 2, 4: 5, 5: 4 };
-
     const targetIdx = FACE_MAP[targetFaceVal];
     const oppIdx = OPPOSITE_MAP[targetIdx];
 
-    // 重置顯示狀態
-    output.innerText = "SCANNING...";
-    if(outputInv) outputInv.innerText = "";
+    // 4. 建立可用移動列表 (Filtered Moves)
+    // 這裡我們直接存取 BIT_PERM_TABLE 的索引
+    let availableMoves = [];
+    for (let i = 0; i < 36; i++) {
+        const name = MOVE_NAMES[i];
+        let isBanned = false;
+        for (const prefix of bannedPrefixes) {
+            if (name.startsWith(prefix)) { isBanned = true; break; }
+        }
+        if (!isBanned) availableMoves.push(i);
+    }
+
+    // 排序優化：將「破壞性小」或「常見」的轉動排前面 (Heuristic Ordering)
+    // 這裡將同軸的層轉動放在一起，有助於剪枝
+    availableMoves.sort((a, b) => {
+        const isBadA = MOVE_NAMES[a].includes("Bw") || MOVE_NAMES[a].includes("Dw");
+        const isBadB = MOVE_NAMES[b].includes("Bw") || MOVE_NAMES[b].includes("Dw");
+        if (isBadA !== isBadB) return isBadA ? 1 : -1;
+        return 0;
+    });
+
+    output.innerText = "CALCULATING...";
     output.style.color = "#FFD60A";
-    stats.innerText = ""; 
+    if (outputInv) outputInv.innerText = "";
+    stats.innerText = "";
 
-    // 使用 setTimeout 讓 UI 有機會渲染 "SCANNING..."
+    // 使用 setTimeout 讓 UI 渲染 "CALCULATING..."
     setTimeout(() => {
-        // --- 初始化 PDB (如果尚未初始化) ---
-        if (!PDB_TABLE) initPDB();
+        // --- 狀態轉換：Array -> BitMask ---
+        // wMask: 白色的位置 (1表示有白色)
+        // yMask: 黃色的位置 (1表示有黃色)
+        let initialWMask = 0, initialYMask = 0;
+        for(let i=0; i<24; i++) {
+            if (cubeState[i] === wId) initialWMask |= (1 << i);
+            else if (cubeState[i] === yId) initialYMask |= (1 << i);
+        }
 
-        const baseState = new Int8Array(cubeState);
-        const startTime = performance.now();
-
-        // ---------------------------------------------------------
-        // 內部工具：計算啟發值 (Heuristic)
-        // ---------------------------------------------------------
-        const getMask = (s, color) => {
-            let mask = 0;
-            for(let i=0; i<24; i++) if (s[i] === color) mask |= (1 << i);
-            return mask;
-        };
-
-        const applyPermToMask = (mask, perm) => {
+        // --- 內部 Helper: 位元操作 ---
+        // 這是極速版的 applyPerm (不分配記憶體)
+        // 使用 var 宣告以避免區塊作用域開銷 (雖然現代 JS 差異極小，但在數億次呼叫中有感)
+        const applyMoveBit = (mask, moveIdx) => {
+            const map = BIT_PERM_TABLE[moveIdx];
             let res = 0;
-            for(let i=0; i<24; i++) if ((mask >> perm[i]) & 1) res |= (1 << i);
+            // Unrolling loop for performance is messy, plain loop is fast enough in V8
+            for(let i=0; i<24; i++) {
+                // 如果來源位置 (map[i]) 有值，則目標位置 (i) 設為 1
+                if ((mask >> map[i]) & 1) res |= (1 << i);
+            }
             return res;
         };
 
-        const getH = (s) => {
-            const wMask = getMask(s, wId);
-            const yMask = getMask(s, yId);
-            const wOnU = applyPermToMask(wMask, FACE_TRANSFORMS[targetIdx]);
-            const yOnU = applyPermToMask(yMask, FACE_TRANSFORMS[oppIdx]);
+        const applyPermToMaskFast = (mask, transformArray) => {
+            let res = 0;
+            for(let i=0; i<24; i++) {
+                if ((mask >> transformArray[i]) & 1) res |= (1 << i);
+            }
+            return res;
+        };
+
+        // --- 啟發函式 (Heuristic) ---
+        // 根據 Target Face 旋轉 Mask 後查表
+        const wTrans = FACE_TRANSFORMS[targetIdx];
+        const yTrans = FACE_TRANSFORMS[oppIdx];
+
+        const getH_Bit = (wMask, yMask) => {
+            // 將當前狀態「虛擬旋轉」到 U 面朝上，然後查 PDB
+            const wOnU = applyPermToMaskFast(wMask, wTrans);
+            const yOnU = applyPermToMaskFast(yMask, yTrans);
+            // 取兩者中較大者 (Admissible Heuristic)
             return Math.max(PDB_TABLE[wOnU], PDB_TABLE[yOnU]);
         };
 
-        // ---------------------------------------------------------
-        // 步驟一：起手勢篩選 (Pre-scan)
-        // ---------------------------------------------------------
+        // --- Pre-scan: 選擇最佳起手勢 (Orientation) ---
         const orientationDefs = [
             { name: "",       moves: [] },
-            { name: "y",      moves: ["y"] }, { name: "y2",     moves: ["y", "y"] }, { name: "y'",     moves: ["y'"] },
-            { name: "x",      moves: ["x"] }, { name: "x y",    moves: ["x", "y"] }, { name: "x y2",   moves: ["x", "y", "y"] }, { name: "x y'",   moves: ["x", "y'"] },
-            { name: "x2",     moves: ["x", "x"] }, { name: "x2 y",   moves: ["x", "x", "y"] }, { name: "x2 y2",  moves: ["x", "x", "y", "y"] }, { name: "x2 y'",  moves: ["x", "x", "y'"] },
-            { name: "x'",     moves: ["x'"] }, { name: "x' y",   moves: ["x'", "y"] }, { name: "x' y2",  moves: ["x'", "y", "y"] }, { name: "x' y'",  moves: ["x'", "y'"] },
-            { name: "z",      moves: ["z"] }, { name: "z y",    moves: ["z", "y"] }, { name: "z y2",   moves: ["z", "y", "y"] }, { name: "z y'",   moves: ["z", "y'"] },
-            { name: "z'",     moves: ["z'"] }, { name: "z' y",   moves: ["z'", "y"] }, { name: "z' y2",  moves: ["z'", "y", "y"] }, { name: "z' y'",  moves: ["z'", "y'"] }
+            { name: "y",      moves: ["y"] }, { name: "y'",     moves: ["y'"] }, { name: "y2",     moves: ["y","y"] },
+            { name: "x",      moves: ["x"] }, { name: "x'",     moves: ["x'"] }, { name: "x2",     moves: ["x","x"] },
+            { name: "z",      moves: ["z"] }, { name: "z'",     moves: ["z'"] }, { name: "z2",     moves: ["z","z"] },
+            // 複合旋轉
+            { name: "x y",    moves: ["x","y"] }, { name: "x y'",   moves: ["x","y'"] },
+            { name: "x' y",   moves: ["x'","y"] }, { name: "x' y'",  moves: ["x'","y'"] }
         ];
 
-        let bestCandidate = null;
-        let minH = Infinity;
-        let bestStartMaskState = null;
+        let bestStartW = 0, bestStartY = 0, bestPrefix = null, minH = 99;
 
-        for (let orient of orientationDefs) {
-            let tempState = new Int8Array(baseState);
-            for (let moveName of orient.moves) {
-                const idx = MOVE_NAMES.indexOf(moveName);
-                if (idx !== -1) {
-                    const p = PERM_TABLE[idx];
-                    const next = new Int8Array(24);
-                    for(let i=0; i<24; i++) next[i] = tempState[p[i]];
-                    tempState = next;
+        // 預先計算每個起手勢的 Mask
+        for(let orient of orientationDefs) {
+            let w = initialWMask, y = initialYMask;
+            // 模擬旋轉 (使用 applyPermToMaskInPDB 因為這裡只跑幾次，不需極致優化)
+            for(let mName of orient.moves) {
+                const idx = MOVE_NAMES.indexOf(mName);
+                if(idx !== -1) {
+                    w = applyPermToMaskInPDB(w, idx);
+                    y = applyPermToMaskInPDB(y, idx);
                 }
             }
-
-            const h = getH(tempState);
-            if (h < minH) {
+            const h = getH_Bit(w, y);
+            if(h < minH) {
                 minH = h;
-                bestCandidate = orient;
-                bestStartMaskState = tempState;
-            } else if (h === minH) {
-                if (orient.moves.length < bestCandidate.moves.length) {
-                    bestCandidate = orient;
-                    bestStartMaskState = tempState;
-                }
+                bestStartW = w;
+                bestStartY = y;
+                bestPrefix = orient;
             }
         }
 
-        // ---------------------------------------------------------
-        // [核心修正] 建立「禁用後」的可用移動列表
-        // ---------------------------------------------------------
-        let sortedMoves = [];
-        
-        // [重要優化] 迴圈只到 36，強制排除 36-41 的旋轉 (x, y, z)
-        // 這是防止運算爆炸的關鍵：既然已經選好了起手勢，解題過程就不該再轉動整顆方塊
-        for (let i = 0; i < 36; i++) {
-            const name = MOVE_NAMES[i];
-            let isBanned = false;
-            
-            // 嚴格比對前綴 (例如 "Bw" 會同時封鎖 "Bw", "Bw2", "Bw'")
-            for (const prefix of bannedPrefixes) {
-                if (name.startsWith(prefix)) {
-                    isBanned = true;
-                    break;
-                }
-            }
-            
-            if (!isBanned) {
-                sortedMoves.push(i);
-            }
-        }
-        
-        // 排序移動優先級，將較難轉的移動 (Bw, Dw) 排在後面
-        sortedMoves.sort((a, b) => {
-            const nameA = MOVE_NAMES[a];
-            const nameB = MOVE_NAMES[b];
-            
-            const isBadA = nameA.includes("Bw") || nameA.includes("Dw");
-            const isBadB = nameB.includes("Bw") || nameB.includes("Dw");
-            
-            if (isBadA && !isBadB) return 1;  
-            if (!isBadA && isBadB) return -1; 
-            return 0; 
-        });
-
-        // ---------------------------------------------------------
-        // 步驟二：IDA* 求解
-        // ---------------------------------------------------------
-        const fastApply = (state, moveIdx) => {
-            const p = PERM_TABLE[moveIdx];
-            const ns = state.slice();
-            for(let i=0; i<24; i++) ns[i] = state[p[i]];
-            return ns;
-        };
-
-        const isSolved = (s) => {
-            const faces = [
-                [0,1,2,3], [12,13,14,15], [4,5,6,7],
-                [20,21,22,23], [8,9,10,11], [16,17,18,19]
-            ];
-            for (let i of faces[targetIdx]) if (s[i] !== wId) return false;
-            for (let i of faces[oppIdx]) if (s[i] !== yId) return false;
-            return true;
-        };
-
+        // --- IDA* 核心 ---
         let path = [];
         let found = false;
         let totalNodes = 0;
+        
+        // [新增] 置換表 (Transposition Table)
+        // Key: 53-bit Integer (wMask + yMask * 2^24)
+        // Value: Depth (記錄到達此狀態的最短步數)
+        // 用途: 防止繞圈圈和重複路徑
+        const tt = new Map();
 
-        const search = (g, bound, prevState, lastMoveFace) => {
+        const search = (g, bound, wMask, yMask, lastMoveFace) => {
             totalNodes++;
-            const h = getH(prevState);
-            const f = g + h;
             
+            // 1. 啟發值計算與剪枝
+            const h = getH_Bit(wMask, yMask);
+            const f = g + h;
             if (f > bound) return f;
-            if (h === 0 && isSolved(prevState)) {
+            if (h === 0) { // 因為 H 是 max(w, y)，h=0 代表兩者都歸位
                 found = true;
                 return f;
             }
 
-            let min = Infinity;
+            // 2. 置換表查閱 (Transposition Table Lookup)
+            // 將兩個 24-bit mask 合併為一個 48-bit key (JS Number 安全範圍是 53-bit)
+            const stateKey = wMask + (yMask * 16777216); // 16777216 = 2^24
             
-            for (let i = 0; i < sortedMoves.length; i++) {
-                const m = sortedMoves[i]; 
+            // 如果我們之前到過這個狀態，且步數更少或相等，則剪枝
+            // 注意：這是 IDA*，所以我們只關心當前迭代 bound 內的剪枝
+            // 為了節省記憶體，我們可以在每次 bound 增加時清空 TT，或者保留最優值
+            const visitedG = tt.get(stateKey);
+            if (visitedG !== undefined && visitedG <= g) {
+                return Infinity; // Skip redundant branch
+            }
+            tt.set(stateKey, g);
 
-                // 這裡現在只會處理 0-35 的面與層移動，不會有旋轉
-                const currentFace = Math.floor(m / 3); 
-                const currentAxis = Math.floor(currentFace / 4);
+            let min = Infinity;
 
-                // 剪枝邏輯 (Pruning)
+            for (let i = 0; i < availableMoves.length; i++) {
+                const m = availableMoves[i];
+                const currentFace = (m / 3) | 0; // Math.floor(m/3)
+                const currentAxis = (currentFace / 4) | 0;
+
+                // 3. 移動剪枝 (Commutativity Pruning)
                 if (lastMoveFace !== -1) {
-                    const lastAxis = Math.floor(lastMoveFace / 4);
-                    // 同軸剪枝：確保移動順序 (例如 Rw R 是合法的，R Rw 則跳過)
+                    const lastAxis = (lastMoveFace / 4) | 0;
+                    // 同軸剪枝: 規定順序 (例如允許 Rw R, 禁止 R Rw)
                     if (currentAxis === lastAxis && currentFace <= lastMoveFace) continue;
                 }
 
-                const nextState = fastApply(prevState, m);
+                // 4. 狀態更新 (Bitwise)
+                const nextW = applyMoveBit(wMask, m);
+                const nextY = applyMoveBit(yMask, m);
+
                 path.push(MOVE_NAMES[m]);
                 
-                const t = search(g + 1, bound, nextState, currentFace);
+                const t = search(g + 1, bound, nextW, nextY, currentFace);
                 
                 if (found) return t;
-                path.pop(); // 回溯
+                path.pop();
+                
                 if (t < min) min = t;
             }
             return min;
         };
 
-        // 開始 IDA* 迴圈
-        let bound = getH(bestStartMaskState);
-        // 若使用了禁用選項，路徑可能會變長，稍微放寬上限到 18
-        while (!found && bound <= 18) {
-            const t = search(0, bound, bestStartMaskState, -1);
+        // 執行 IDA*
+        let bound = minH;
+        // 如果有禁用移動，放寬搜尋上限，避免無限計算
+        const MAX_DEPTH = 16; 
+        
+        while (!found && bound <= MAX_DEPTH) {
+            tt.clear(); // 每次加深搜尋時清空 TT，確保找到的是當前深度下的解
+            const t = search(0, bound, bestStartW, bestStartY, -1);
             if (found) break;
-            if (t === Infinity) break;
+            if (t === Infinity) break; // 無解
             bound = t;
         }
 
-        const duration = (performance.now() - startTime).toFixed(1);
+        const duration = (performance.now() - startTime).toFixed(0);
 
-        // ---------------------------------------------------------
-        // 輸出結果
-        // ---------------------------------------------------------
+        // 5. 輸出結果
         if (found) {
-            let solutionStr = path.join(" ");
-            let prefixStr = bestCandidate.name;
-            let finalDisplay = prefixStr ? `${prefixStr} ${solutionStr}` : solutionStr;
-            const stepCount = path.length;
+            const solutionStr = path.join(" ");
+            const prefixStr = bestPrefix.name;
+            const fullSol = prefixStr ? `${prefixStr} ${solutionStr}` : solutionStr;
             
-            output.innerText = finalDisplay;
+            output.innerText = fullSol;
             output.style.color = "#00E5FF";
-            
-            // --- 反向公式計算 ---
+
+            // 反向公式計算
             const invertMove = (m) => {
                 if(!m) return "";
                 if(m.endsWith("'")) return m.slice(0, -1); 
                 if(m.endsWith("2")) return m; 
                 return m + "'"; 
             };
+            const invPath = [...path].reverse().map(invertMove);
+            const invSetup = prefixStr ? prefixStr.split(" ").reverse().map(invertMove) : [];
+            
+            // 處理 Target Face 的反向 Setup
+            const ANCHOR_MAP = { 'U':'', 'D':'x2', 'F':"x'", 'B':'x', 'R':'z', 'L':"z'" };
+            const anchor = ANCHOR_MAP[targetFaceVal];
+            
+            let fullInvParts = [...invPath, ...invSetup];
+            if(anchor) fullInvParts.unshift(anchor);
+            
+            if (outputInv) outputInv.innerText = fullInvParts.join(" ");
+            stats.innerText = `${path.length} Moves (${duration}ms / ${totalNodes} nodes)`;
 
-            let invPath = [...path].reverse().map(invertMove);
-            let invSetup = [];
-            if(prefixStr) {
-                invSetup = prefixStr.split(" ").reverse().map(invertMove);
-            }
-
-            const ANCHOR_ROTATIONS = {
-                'U': '', 'D': 'x2', 'F': "x'", 'B': 'x', 'R': 'z', 'L': "z'"
-            };
-            const anchor = ANCHOR_ROTATIONS[targetFaceVal] || '';
-
-            let fullInverseParts = [...invPath, ...invSetup];
-            if (anchor) {
-                if (fullInverseParts.length > 0) {
-                    const firstMove = fullInverseParts[0];
-                    const axis = anchor.charAt(0); 
-                    if (firstMove.startsWith(axis)) {
-                        const getVal = (m) => {
-                            if (m.endsWith("2")) return 2;
-                            if (m.endsWith("'")) return -1;
-                            return 1;
-                        };
-                        let sum = getVal(anchor) + getVal(firstMove);
-                        let newSuffix = "";
-                        let shouldRemove = false;
-
-                        if (sum === 0 || sum === 4 || sum === -4) shouldRemove = true;
-                        else if (sum === 2 || sum === -2) newSuffix = "2";
-                        else if (sum === -1 || sum === 3) newSuffix = "'";
-                        else if (sum === 1 || sum === -3) newSuffix = "";
-
-                        if (shouldRemove) fullInverseParts.shift();
-                        else fullInverseParts[0] = axis + newSuffix;
-                    } else {
-                        fullInverseParts.unshift(anchor);
-                    }
-                } else {
-                    fullInverseParts.unshift(anchor);
+            if (player) {
+                player.alg = fullSol;
+                player.experimentalSetupAlg = fullInvParts.join(" ");
+                player.timestamp = 0;
+                if(window.innerWidth <= 900 && typeof switchMobileTab === 'function') {
+                    switchMobileTab('preview');
                 }
             }
-            
-            let fullInverse = fullInverseParts.join(" ");
-            if(outputInv) outputInv.innerText = fullInverse;
-
-            stats.innerText = `${stepCount} Moves${prefixStr ? ' (+Setup)' : ''}|Time: ${duration}ms`;
-
-            if (player) {
-                player.alg = finalDisplay;
-                player.experimentalSetupAlg = fullInverse;
-                player.timestamp = 0;
-                if (window.innerWidth <= 900) switchMobileTab('preview');
-            }
-
         } else {
-            output.innerText = "無解 (或深度超限)";
-            if(outputInv) outputInv.innerText = "";
+            output.innerText = "無法在限時內找到解";
             output.style.color = "#FF4444";
             stats.innerText = `Nodes: ${totalNodes}`;
-            if (player) {
-                player.alg = "";
-                player.experimentalSetupAlg = "";
-            }
         }
-
-    }, 50); 
+    }, 50);
 }
 
 // --- 初始化 PDB 表格 (僅需執行一次) ---
