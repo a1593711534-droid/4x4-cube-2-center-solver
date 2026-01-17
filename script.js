@@ -589,7 +589,7 @@ let FACE_TRANSFORMS = null;
    [修改說明] 已新增過濾 Bw, Dw, Fw, Lw 的功能
    ========================================================= */
 function solveCenters() {
-    // 0. 預先取得 UI 元素以便顯示錯誤訊息
+    // 0. 預先取得 UI 元素
     const output = document.getElementById('solution-text');
     const outputInv = document.getElementById('inverse-solution-text');
     const stats = document.getElementById('solution-stats');
@@ -604,7 +604,6 @@ function solveCenters() {
     if (counts[0] === 4 && counts[1] === 4) {
         wId = 0; yId = 1;
     } else {
-        // 檢查是否有任意兩色正好 4 格
         const candidates = [];
         counts.forEach((cnt, colId) => { if (cnt === 4) candidates.push(colId); });
         
@@ -619,20 +618,20 @@ function solveCenters() {
                 player.alg = "";
                 player.experimentalSetupAlg = "";
             }
-            return; // 終止函式
+            return;
         }
     }
 
-    // 2. 獲取使用者指定的白色目標面
+    // 2. 獲取使用者設定
     const targetSelect = document.getElementById('target-face');
     const targetFaceVal = targetSelect ? targetSelect.value : 'U';
     
-    // [新增] 獲取禁用轉動的選項
+    // [關鍵] 獲取禁用轉動的選項
     const bannedPrefixes = [];
-    if (document.getElementById('ban-bw') && document.getElementById('ban-bw').checked) bannedPrefixes.push("Bw");
-    if (document.getElementById('ban-dw') && document.getElementById('ban-dw').checked) bannedPrefixes.push("Dw");
-    if (document.getElementById('ban-fw') && document.getElementById('ban-fw').checked) bannedPrefixes.push("Fw");
-    if (document.getElementById('ban-lw') && document.getElementById('ban-lw').checked) bannedPrefixes.push("Lw");
+    if (document.getElementById('ban-bw')?.checked) bannedPrefixes.push("Bw");
+    if (document.getElementById('ban-dw')?.checked) bannedPrefixes.push("Dw");
+    if (document.getElementById('ban-fw')?.checked) bannedPrefixes.push("Fw");
+    if (document.getElementById('ban-lw')?.checked) bannedPrefixes.push("Lw");
 
     const FACE_MAP = { 'U': 0, 'D': 1, 'F': 2, 'B': 3, 'R': 4, 'L': 5 };
     const OPPOSITE_MAP = { 0: 1, 1: 0, 2: 3, 3: 2, 4: 5, 5: 4 };
@@ -646,15 +645,16 @@ function solveCenters() {
     output.style.color = "#FFD60A";
     stats.innerText = ""; 
 
+    // 使用 setTimeout 讓 UI 有機會渲染 "SCANNING..."
     setTimeout(() => {
-        // --- 初始化 PDB ---
+        // --- 初始化 PDB (如果尚未初始化) ---
         if (!PDB_TABLE) initPDB();
 
         const baseState = new Int8Array(cubeState);
         const startTime = performance.now();
 
         // ---------------------------------------------------------
-        // 內部工具：計算啟發值
+        // 內部工具：計算啟發值 (Heuristic)
         // ---------------------------------------------------------
         const getMask = (s, color) => {
             let mask = 0;
@@ -677,7 +677,7 @@ function solveCenters() {
         };
 
         // ---------------------------------------------------------
-        // 定義 24 種起手勢
+        // 步驟一：起手勢篩選 (Pre-scan)
         // ---------------------------------------------------------
         const orientationDefs = [
             { name: "",       moves: [] },
@@ -689,7 +689,6 @@ function solveCenters() {
             { name: "z'",     moves: ["z'"] }, { name: "z' y",   moves: ["z'", "y"] }, { name: "z' y2",  moves: ["z'", "y", "y"] }, { name: "z' y'",  moves: ["z'", "y'"] }
         ];
 
-        // 步驟一：快速篩選 (Pre-scan)
         let bestCandidate = null;
         let minH = Infinity;
         let bestStartMaskState = null;
@@ -719,7 +718,46 @@ function solveCenters() {
             }
         }
 
+        // ---------------------------------------------------------
+        // [核心修正] 建立「禁用後」的可用移動列表
+        // ---------------------------------------------------------
+        let sortedMoves = [];
+        
+        // [重要優化] 迴圈只到 36，強制排除 36-41 的旋轉 (x, y, z)
+        // 這是防止運算爆炸的關鍵：既然已經選好了起手勢，解題過程就不該再轉動整顆方塊
+        for (let i = 0; i < 36; i++) {
+            const name = MOVE_NAMES[i];
+            let isBanned = false;
+            
+            // 嚴格比對前綴 (例如 "Bw" 會同時封鎖 "Bw", "Bw2", "Bw'")
+            for (const prefix of bannedPrefixes) {
+                if (name.startsWith(prefix)) {
+                    isBanned = true;
+                    break;
+                }
+            }
+            
+            if (!isBanned) {
+                sortedMoves.push(i);
+            }
+        }
+        
+        // 排序移動優先級，將較難轉的移動 (Bw, Dw) 排在後面
+        sortedMoves.sort((a, b) => {
+            const nameA = MOVE_NAMES[a];
+            const nameB = MOVE_NAMES[b];
+            
+            const isBadA = nameA.includes("Bw") || nameA.includes("Dw");
+            const isBadB = nameB.includes("Bw") || nameB.includes("Dw");
+            
+            if (isBadA && !isBadB) return 1;  
+            if (!isBadA && isBadB) return -1; 
+            return 0; 
+        });
+
+        // ---------------------------------------------------------
         // 步驟二：IDA* 求解
+        // ---------------------------------------------------------
         const fastApply = (state, moveIdx) => {
             const p = PERM_TABLE[moveIdx];
             const ns = state.slice();
@@ -737,44 +775,6 @@ function solveCenters() {
             return true;
         };
 
-        // ---------------------------------------------------------
-        // [修改] 建立過濾與排序後的移動列表
-        // ---------------------------------------------------------
-        let sortedMoves = [];
-        
-        // 遍歷 0-41 所有移動
-        for (let i = 0; i < 42; i++) {
-            const name = MOVE_NAMES[i];
-            let isBanned = false;
-            
-            // 檢查是否被禁用 (比對前綴，例如 "Bw" 會匹配 "Bw", "Bw2", "Bw'")
-            for (const prefix of bannedPrefixes) {
-                if (name.startsWith(prefix)) {
-                    isBanned = true;
-                    break;
-                }
-            }
-            
-            // 如果沒被禁用，才加入清單
-            if (!isBanned) {
-                sortedMoves.push(i);
-            }
-        }
-        
-        // 依照原始偏好邏輯排序 (即時 Bw/Dw 沒被禁用，也排在後面)
-        sortedMoves.sort((a, b) => {
-            const nameA = MOVE_NAMES[a];
-            const nameB = MOVE_NAMES[b];
-            
-            // 判斷是否為「不受歡迎」的移動 (如果被禁用根本不會進來這裡，但邏輯保留無妨)
-            const isBadA = nameA.includes("Bw") || nameA.includes("Dw");
-            const isBadB = nameB.includes("Bw") || nameB.includes("Dw");
-            
-            if (isBadA && !isBadB) return 1;  
-            if (!isBadA && isBadB) return -1; 
-            return 0; 
-        });
-
         let path = [];
         let found = false;
         let totalNodes = 0;
@@ -783,6 +783,7 @@ function solveCenters() {
             totalNodes++;
             const h = getH(prevState);
             const f = g + h;
+            
             if (f > bound) return f;
             if (h === 0 && isSolved(prevState)) {
                 found = true;
@@ -791,35 +792,36 @@ function solveCenters() {
 
             let min = Infinity;
             
-            // [修改] 使用過濾後的 sortedMoves 進行遍歷 (長度動態變化)
             for (let i = 0; i < sortedMoves.length; i++) {
-                const m = sortedMoves[i]; // 取出實際的移動索引
+                const m = sortedMoves[i]; 
 
-                const currentIsRot = m >= 36;
-                const currentFace = currentIsRot ? 9 : Math.floor(m / 3); 
-                const currentAxis = currentIsRot ? 9 : Math.floor(currentFace / 4);
+                // 這裡現在只會處理 0-35 的面與層移動，不會有旋轉
+                const currentFace = Math.floor(m / 3); 
+                const currentAxis = Math.floor(currentFace / 4);
 
+                // 剪枝邏輯 (Pruning)
                 if (lastMoveFace !== -1) {
-                    if (currentIsRot && lastMoveFace === 9) continue;
-                    if (!currentIsRot && lastMoveFace !== 9) {
-                        const lastAxis = Math.floor(lastMoveFace / 4);
-                        if (currentAxis === lastAxis && currentFace <= lastMoveFace) continue;
-                    }
+                    const lastAxis = Math.floor(lastMoveFace / 4);
+                    // 同軸剪枝：確保移動順序 (例如 Rw R 是合法的，R Rw 則跳過)
+                    if (currentAxis === lastAxis && currentFace <= lastMoveFace) continue;
                 }
 
                 const nextState = fastApply(prevState, m);
                 path.push(MOVE_NAMES[m]);
-                const t = search(g + 1, bound, nextState, currentIsRot ? 9 : currentFace);
+                
+                const t = search(g + 1, bound, nextState, currentFace);
+                
                 if (found) return t;
-                path.pop();
+                path.pop(); // 回溯
                 if (t < min) min = t;
             }
             return min;
         };
 
+        // 開始 IDA* 迴圈
         let bound = getH(bestStartMaskState);
-        // 設定最大搜尋深度
-        while (!found && bound <= 14) {
+        // 若使用了禁用選項，路徑可能會變長，稍微放寬上限到 18
+        while (!found && bound <= 18) {
             const t = search(0, bound, bestStartMaskState, -1);
             if (found) break;
             if (t === Infinity) break;
@@ -829,7 +831,7 @@ function solveCenters() {
         const duration = (performance.now() - startTime).toFixed(1);
 
         // ---------------------------------------------------------
-        // 輸出結果與動畫整合
+        // 輸出結果
         // ---------------------------------------------------------
         if (found) {
             let solutionStr = path.join(" ");
@@ -840,7 +842,7 @@ function solveCenters() {
             output.innerText = finalDisplay;
             output.style.color = "#00E5FF";
             
-            // --- 反向公式計算 (Setup) ---
+            // --- 反向公式計算 ---
             const invertMove = (m) => {
                 if(!m) return "";
                 if(m.endsWith("'")) return m.slice(0, -1); 
@@ -855,14 +857,8 @@ function solveCenters() {
             }
 
             const ANCHOR_ROTATIONS = {
-                'U': '',
-                'D': 'x2',
-                'F': "x'", 
-                'B': 'x',
-                'R': 'z',
-                'L': "z'"
+                'U': '', 'D': 'x2', 'F': "x'", 'B': 'x', 'R': 'z', 'L': "z'"
             };
-            
             const anchor = ANCHOR_ROTATIONS[targetFaceVal] || '';
 
             let fullInverseParts = [...invPath, ...invSetup];
@@ -870,7 +866,6 @@ function solveCenters() {
                 if (fullInverseParts.length > 0) {
                     const firstMove = fullInverseParts[0];
                     const axis = anchor.charAt(0); 
-
                     if (firstMove.startsWith(axis)) {
                         const getVal = (m) => {
                             if (m.endsWith("2")) return 2;
@@ -881,21 +876,13 @@ function solveCenters() {
                         let newSuffix = "";
                         let shouldRemove = false;
 
-                        if (sum === 0 || sum === 4 || sum === -4) {
-                            shouldRemove = true;
-                        } else if (sum === 2 || sum === -2) {
-                            newSuffix = "2";
-                        } else if (sum === -1 || sum === 3) {
-                            newSuffix = "'";
-                        } else if (sum === 1 || sum === -3) {
-                            newSuffix = "";
-                        }
+                        if (sum === 0 || sum === 4 || sum === -4) shouldRemove = true;
+                        else if (sum === 2 || sum === -2) newSuffix = "2";
+                        else if (sum === -1 || sum === 3) newSuffix = "'";
+                        else if (sum === 1 || sum === -3) newSuffix = "";
 
-                        if (shouldRemove) {
-                            fullInverseParts.shift();
-                        } else {
-                            fullInverseParts[0] = axis + newSuffix;
-                        }
+                        if (shouldRemove) fullInverseParts.shift();
+                        else fullInverseParts[0] = axis + newSuffix;
                     } else {
                         fullInverseParts.unshift(anchor);
                     }
@@ -905,10 +892,7 @@ function solveCenters() {
             }
             
             let fullInverse = fullInverseParts.join(" ");
-            
-            if(outputInv) {
-                outputInv.innerText = fullInverse;
-            }
+            if(outputInv) outputInv.innerText = fullInverse;
 
             stats.innerText = `${stepCount} Moves${prefixStr ? ' (+Setup)' : ''}|Time: ${duration}ms`;
 
@@ -916,11 +900,7 @@ function solveCenters() {
                 player.alg = finalDisplay;
                 player.experimentalSetupAlg = fullInverse;
                 player.timestamp = 0;
-                player.play();
-                
-                if (window.innerWidth <= 900) {
-                    switchMobileTab('preview');
-                }
+                if (window.innerWidth <= 900) switchMobileTab('preview');
             }
 
         } else {
@@ -928,14 +908,13 @@ function solveCenters() {
             if(outputInv) outputInv.innerText = "";
             output.style.color = "#FF4444";
             stats.innerText = `Nodes: ${totalNodes}`;
-            
             if (player) {
                 player.alg = "";
                 player.experimentalSetupAlg = "";
             }
         }
 
-    }, 50);
+    }, 50); 
 }
 
 // --- 初始化 PDB 表格 (僅需執行一次) ---
