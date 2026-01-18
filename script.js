@@ -358,31 +358,33 @@ function rotateView(dx, dy) {
 }
 
 function resetCube() {
-    // 1. 重置狀態陣列
+    // 1. 重置狀態陣列 (邏輯數據)
     cubeState.fill(-1);
     
     // 2. 定義未填色時的顏色 (需與 create4x4Cube 中的 EMPTY_COLOR 一致)
     const EMPTY_COLOR = 0x282828; 
 
-    // 3. 遍歷所有方塊進行重置
-    cubeGroup.children.forEach(mesh => {
-        // 只有中心塊需要重置顏色
-        if (mesh.userData.isCenter) {
-            // 找出該 mesh 身上所有不是黑色的材質 (即外觀貼紙)
-            mesh.material.forEach(m => {
-                // 只要不是核心黑色(0x000000)，就重置為灰色
-                if(m.color.getHex() !== 0x000000) {
-                    m.color.setHex(EMPTY_COLOR);
-                }
-            });
-        }
-    });
+    // 3. 遍歷所有方塊進行重置 (不分中心或邊塊，全部重刷)
+    if (cubeGroup && cubeGroup.children) {
+        cubeGroup.children.forEach(mesh => {
+            // 檢查該 mesh 是否有材質陣列
+            if (Array.isArray(mesh.material)) {
+                mesh.material.forEach(m => {
+                    // 只要不是核心黑色(0x000000)，就重置為灰色
+                    // 這樣可以把相機掃描到的邊塊/角塊顏色也一併清除
+                    if(m.color.getHex() !== 0x000000) {
+                        m.color.setHex(EMPTY_COLOR);
+                    }
+                });
+            }
+        });
+    }
 
     // 4. 重置 UI 文字
     document.getElementById('solution-text').innerText = "READY";
     document.getElementById('solution-text').style.color = "#FFD60A";
     
-    // [新增] 清空反向公式
+    // 清空反向公式
     const invText = document.getElementById('inverse-solution-text');
     if(invText) invText.innerText = "";
     
@@ -604,36 +606,41 @@ function solveCenters() {
     const player = document.getElementById('solution-player');
     const startTime = performance.now();
 
-    // 1. 顏色驗證與 ID 識別
-    const counts = [0, 0, 0, 0, 0, 0];
-    cubeState.forEach(c => { if (c !== -1) counts[c]++; });
+    // 1. 強制鎖定白(0)與黃(1)邏輯
+    // 在 PALETTE 定義中：Index 0 = White, Index 1 = Yellow
+    const IDX_WHITE = 0;
+    const IDX_YELLOW = 1;
 
-    let wId = -1, yId = -1;
-    // 尋找數量為 4 的兩個顏色
-    const candidates = [];
-    counts.forEach((cnt, colId) => { if (cnt === 4) candidates.push(colId); });
+    let whiteCount = 0;
+    let yellowCount = 0;
 
-    if (candidates.length === 2) {
-        wId = candidates[0]; yId = candidates[1];
-    } else {
+    // 遍歷目前的魔方狀態計算白黃數量
+    cubeState.forEach(c => { 
+        if (c === IDX_WHITE) whiteCount++;
+        if (c === IDX_YELLOW) yellowCount++;
+    });
+
+    // 嚴格檢查：只允許白黃各 4 格，忽略其他顏色
+    // 這樣相機掃描(6色全滿)可以通過，手動輸入(只填白黃)也可以通過
+    if (whiteCount !== 4 || yellowCount !== 4) {
         output.innerText = "Error";
-        stats.innerText = `需兩色各 4 格\n目前: [${counts.join(',')}]`;
+        stats.innerText = `需白、黃各 4 格\n目前: 白=${whiteCount}, 黃=${yellowCount}`;
         output.style.color = "#FF4444";
         return;
     }
 
+    const wId = IDX_WHITE;
+    const yId = IDX_YELLOW;
+
     // 2. 準備 PDB 與 加速表
     if (!PDB_TABLE) initPDB();
     
-    // [優化] 建立位元置換表 (僅第一次執行時建立)
-    // 這將 PERM_TABLE 轉換為位元遮罩操作所需的數據結構，避免迴圈內的陣列存取
+    // 建立位元置換表 (僅第一次執行時建立)
     if (!BIT_PERM_TABLE) {
         BIT_PERM_TABLE = new Array(36); // 只處理 0-35 的移動
         for (let m = 0; m < 36; m++) {
             const p = PERM_TABLE[m];
             const map = new Int32Array(24);
-            // map[i] 存儲來源位置：即要把第 p[i] 位的值搬到第 i 位
-            // 在位元運算中：若 (oldMask >> p[i]) & 1，則 newMask |= (1 << i)
             for(let i=0; i<24; i++) map[i] = p[i];
             BIT_PERM_TABLE[m] = map;
         }
@@ -655,7 +662,6 @@ function solveCenters() {
     const oppIdx = OPPOSITE_MAP[targetIdx];
 
     // 4. 建立可用移動列表 (Filtered Moves)
-    // 這裡我們直接存取 BIT_PERM_TABLE 的索引
     let availableMoves = [];
     for (let i = 0; i < 36; i++) {
         const name = MOVE_NAMES[i];
@@ -666,8 +672,7 @@ function solveCenters() {
         if (!isBanned) availableMoves.push(i);
     }
 
-    // 排序優化：將「破壞性小」或「常見」的轉動排前面 (Heuristic Ordering)
-    // 這裡將同軸的層轉動放在一起，有助於剪枝
+    // 排序優化
     availableMoves.sort((a, b) => {
         const isBadA = MOVE_NAMES[a].includes("Bw") || MOVE_NAMES[a].includes("Dw");
         const isBadB = MOVE_NAMES[b].includes("Bw") || MOVE_NAMES[b].includes("Dw");
@@ -683,8 +688,6 @@ function solveCenters() {
     // 使用 setTimeout 讓 UI 渲染 "CALCULATING..."
     setTimeout(() => {
         // --- 狀態轉換：Array -> BitMask ---
-        // wMask: 白色的位置 (1表示有白色)
-        // yMask: 黃色的位置 (1表示有黃色)
         let initialWMask = 0, initialYMask = 0;
         for(let i=0; i<24; i++) {
             if (cubeState[i] === wId) initialWMask |= (1 << i);
@@ -692,14 +695,10 @@ function solveCenters() {
         }
 
         // --- 內部 Helper: 位元操作 ---
-        // 這是極速版的 applyPerm (不分配記憶體)
-        // 使用 var 宣告以避免區塊作用域開銷 (雖然現代 JS 差異極小，但在數億次呼叫中有感)
         const applyMoveBit = (mask, moveIdx) => {
             const map = BIT_PERM_TABLE[moveIdx];
             let res = 0;
-            // Unrolling loop for performance is messy, plain loop is fast enough in V8
             for(let i=0; i<24; i++) {
-                // 如果來源位置 (map[i]) 有值，則目標位置 (i) 設為 1
                 if ((mask >> map[i]) & 1) res |= (1 << i);
             }
             return res;
@@ -714,15 +713,12 @@ function solveCenters() {
         };
 
         // --- 啟發函式 (Heuristic) ---
-        // 根據 Target Face 旋轉 Mask 後查表
         const wTrans = FACE_TRANSFORMS[targetIdx];
         const yTrans = FACE_TRANSFORMS[oppIdx];
 
         const getH_Bit = (wMask, yMask) => {
-            // 將當前狀態「虛擬旋轉」到 U 面朝上，然後查 PDB
             const wOnU = applyPermToMaskFast(wMask, wTrans);
             const yOnU = applyPermToMaskFast(yMask, yTrans);
-            // 取兩者中較大者 (Admissible Heuristic)
             return Math.max(PDB_TABLE[wOnU], PDB_TABLE[yOnU]);
         };
 
@@ -732,17 +728,14 @@ function solveCenters() {
             { name: "y",      moves: ["y"] }, { name: "y'",     moves: ["y'"] }, { name: "y2",     moves: ["y","y"] },
             { name: "x",      moves: ["x"] }, { name: "x'",     moves: ["x'"] }, { name: "x2",     moves: ["x","x"] },
             { name: "z",      moves: ["z"] }, { name: "z'",     moves: ["z'"] }, { name: "z2",     moves: ["z","z"] },
-            // 複合旋轉
             { name: "x y",    moves: ["x","y"] }, { name: "x y'",   moves: ["x","y'"] },
             { name: "x' y",   moves: ["x'","y"] }, { name: "x' y'",  moves: ["x'","y'"] }
         ];
 
         let bestStartW = 0, bestStartY = 0, bestPrefix = null, minH = 99;
 
-        // 預先計算每個起手勢的 Mask
         for(let orient of orientationDefs) {
             let w = initialWMask, y = initialYMask;
-            // 模擬旋轉 (使用 applyPermToMaskInPDB 因為這裡只跑幾次，不需極致優化)
             for(let mName of orient.moves) {
                 const idx = MOVE_NAMES.indexOf(mName);
                 if(idx !== -1) {
@@ -764,34 +757,25 @@ function solveCenters() {
         let found = false;
         let totalNodes = 0;
         
-        // [新增] 置換表 (Transposition Table)
-        // Key: 53-bit Integer (wMask + yMask * 2^24)
-        // Value: Depth (記錄到達此狀態的最短步數)
-        // 用途: 防止繞圈圈和重複路徑
+        // 置換表 (Transposition Table)
         const tt = new Map();
 
         const search = (g, bound, wMask, yMask, lastMoveFace) => {
             totalNodes++;
             
-            // 1. 啟發值計算與剪枝
             const h = getH_Bit(wMask, yMask);
             const f = g + h;
             if (f > bound) return f;
-            if (h === 0) { // 因為 H 是 max(w, y)，h=0 代表兩者都歸位
+            if (h === 0) {
                 found = true;
                 return f;
             }
 
-            // 2. 置換表查閱 (Transposition Table Lookup)
-            // 將兩個 24-bit mask 合併為一個 48-bit key (JS Number 安全範圍是 53-bit)
-            const stateKey = wMask + (yMask * 16777216); // 16777216 = 2^24
-            
-            // 如果我們之前到過這個狀態，且步數更少或相等，則剪枝
-            // 注意：這是 IDA*，所以我們只關心當前迭代 bound 內的剪枝
-            // 為了節省記憶體，我們可以在每次 bound 增加時清空 TT，或者保留最優值
+            // TT Lookup
+            const stateKey = wMask + (yMask * 16777216);
             const visitedG = tt.get(stateKey);
             if (visitedG !== undefined && visitedG <= g) {
-                return Infinity; // Skip redundant branch
+                return Infinity;
             }
             tt.set(stateKey, g);
 
@@ -799,17 +783,16 @@ function solveCenters() {
 
             for (let i = 0; i < availableMoves.length; i++) {
                 const m = availableMoves[i];
-                const currentFace = (m / 3) | 0; // Math.floor(m/3)
+                const currentFace = (m / 3) | 0;
                 const currentAxis = (currentFace / 4) | 0;
 
-                // 3. 移動剪枝 (Commutativity Pruning)
+                // 移動剪枝
                 if (lastMoveFace !== -1) {
                     const lastAxis = (lastMoveFace / 4) | 0;
-                    // 同軸剪枝: 規定順序 (例如允許 Rw R, 禁止 R Rw)
                     if (currentAxis === lastAxis && currentFace <= lastMoveFace) continue;
                 }
 
-                // 4. 狀態更新 (Bitwise)
+                // 狀態更新
                 const nextW = applyMoveBit(wMask, m);
                 const nextY = applyMoveBit(yMask, m);
 
@@ -827,14 +810,13 @@ function solveCenters() {
 
         // 執行 IDA*
         let bound = minH;
-        // 如果有禁用移動，放寬搜尋上限，避免無限計算
         const MAX_DEPTH = 16; 
         
         while (!found && bound <= MAX_DEPTH) {
-            tt.clear(); // 每次加深搜尋時清空 TT，確保找到的是當前深度下的解
+            tt.clear();
             const t = search(0, bound, bestStartW, bestStartY, -1);
             if (found) break;
-            if (t === Infinity) break; // 無解
+            if (t === Infinity) break;
             bound = t;
         }
 
@@ -859,7 +841,6 @@ function solveCenters() {
             const invPath = [...path].reverse().map(invertMove);
             const invSetup = prefixStr ? prefixStr.split(" ").reverse().map(invertMove) : [];
             
-            // 處理 Target Face 的反向 Setup
             const ANCHOR_MAP = { 'U':'', 'D':'x2', 'F':"x'", 'B':'x', 'R':'z', 'L':"z'" };
             const anchor = ANCHOR_MAP[targetFaceVal];
             
