@@ -285,7 +285,7 @@ twisty-player { width: 100%; height: 100%; }
         overflow: hidden;
     }
 
-    /* 2. 主操作區：佔據剩餘空間 */
+    /* 2. 主操作區：佔據剩餘空間 (3D 與 預覽) */
     .main-column {
         order: 1;
         flex: 1;
@@ -302,7 +302,6 @@ twisty-player { width: 100%; height: 100%; }
         padding: 10px 16px;
         z-index: 20;
         width: 100%;
-        /* 限制最大高度，防止公式太長把按鈕擠出去 */
         max-height: 25vh; 
         overflow-y: auto;
         border-bottom: 1px solid #333;
@@ -441,44 +440,60 @@ twisty-player { width: 100%; height: 100%; }
     .palette-container label { display: none; }
     .color-swatch { height: 32px; }
 
-    /* 6. 底部控制面板 (沉底) */
+    /* 6. 底部控制面板 (結構重構以實現固定按鈕) */
     .panel-controls {
         order: 2;
         flex-shrink: 0;
+        height: 45vh; /* 固定高度，確保不佔滿全螢幕 */
         padding: 12px;
         padding-bottom: calc(12px + env(safe-area-inset-bottom));
         background: var(--panel-bg);
         border-top: 1px solid var(--panel-border);
         border-right: none;
         width: 100%;
-        max-height: 45vh; /* 稍微增加高度以容納多排按鈕 */
-        overflow-y: auto;
+        
+        /* 使用 Flex column 佈局來控制內部捲動 */
+        display: flex;
+        flex-direction: column;
+        overflow: hidden; /* 禁止整個面板捲動 */
     }
 
     .panel-header, .subtitle, .footer-note { display: none; }
 
-    .info-text { display: none !important; }
-    
+    /* 隱藏說明文字群組，這讓 Target 成為第一個可見元素 */
     .input-group:has(.info-text) { display: none; }
+    .info-text { display: none !important; }
 
+    /* 中間捲動區：包含 Target 與 Checkboxes */
     .control-section {
+        flex: 1; /* 佔據剩餘空間 */
+        overflow-y: auto; /* 只有這個區域可以捲動 */
+        display: flex;
         flex-direction: column;
         gap: 12px;
         padding-bottom: 8px;
         margin: 0;
         border: none;
     }
+
+    /* 目標設定 (Target) 固定在捲動區頂部 */
+    /* 注意：使用 :has 來選取包含 target select 的 input-group */
+    .input-group:has(#target-face) {
+        position: sticky;
+        top: 0;
+        z-index: 10;
+        background-color: var(--panel-bg); /* 確保背景不透明，遮擋下方內容 */
+        padding-bottom: 10px;
+        border-bottom: 1px solid #333;
+        margin-bottom: 4px;
+    }
     
     .input-group { 
-        flex: 1; 
         width: 100%;
-        margin-bottom: 8px; /* 增加群組間距 */
         flex: none; /* 防止被壓縮 */
     }
 
-    /* --- [優化核心] 手機版勾選框樣式：改為按鈕陣列 --- */
-
-    /* 7.1 強制顯示標題 (原本在舊版代碼中被隱藏，現在要顯示出來當分類標題) */
+    /* 7.1 強制顯示標題 */
     .input-group > label {
         display: block !important;
         font-size: 12px;
@@ -487,30 +502,27 @@ twisty-player { width: 100%; height: 100%; }
         font-weight: bold;
     }
 
-    /* 7.2 勾選框容器：移除外框，改為 2x2 格狀佈局 */
+    /* 7.2 勾選框容器：2x2 格狀佈局 */
     .checkbox-group {
         display: grid;
-        grid-template-columns: 1fr 1fr; /* 兩列並排，完美對稱 */
-        gap: 8px; /* 按鈕間距 */
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
         background: transparent;
         padding: 0;
         border: none;
         margin-top: 4px;
     }
 
-    /* 7.3 單個勾選項目：偽裝成大按鈕 */
+    /* 7.3 單個勾選項目：按鈕樣式 */
     .cb-label {
         display: flex !important;
         align-items: center;
-        justify-content: center; /* 文字置中 */
+        justify-content: center;
         gap: 6px;
-        
-        /* 按鈕外觀 */
         background-color: #1a1a1a;
         border: 1px solid #333;
         border-radius: 8px;
-        padding: 10px 4px; /* 增加點擊區域 */
-        
+        padding: 10px 4px;
         color: #888;
         font-size: 13px;
         font-family: var(--font-mono);
@@ -519,15 +531,14 @@ twisty-player { width: 100%; height: 100%; }
         position: relative;
     }
 
-    /* 7.4 [選中狀態] 高亮顯示：青色邊框與發光背景 */
+    /* 7.4 選中狀態高亮 */
     .cb-label:has(input:checked) {
-        background-color: rgba(0, 229, 255, 0.15); /* 淡青色背景 */
-        border-color: var(--accent-color); /* 青色邊框 */
-        color: #fff; /* 白色文字 */
+        background-color: rgba(0, 229, 255, 0.15);
+        border-color: var(--accent-color);
+        color: #fff;
         box-shadow: 0 0 8px rgba(0, 229, 255, 0.1);
     }
 
-    /* 7.5 優化 checkbox 本體顯示 */
     .cb-label input[type="checkbox"] {
         accent-color: var(--accent-color);
         width: 14px;
@@ -536,7 +547,6 @@ twisty-player { width: 100%; height: 100%; }
         cursor: pointer;
     }
     
-    /* 7.6 縮小說明文字，避免佔位 */
     .input-group div[style*="font-size:10px"] {
         font-size: 10px !important;
         margin-top: 4px;
@@ -546,12 +556,17 @@ twisty-player { width: 100%; height: 100%; }
         text-overflow: ellipsis;
     }
 
-    /* 8. 底部主要按鈕 (開始計算 / 重置) */
+    /* 8. 底部主要按鈕 (固定顯示) */
     .action-buttons {
+        flex-shrink: 0; /* 禁止縮小，確保永遠可見 */
         display: grid;
         grid-template-columns: 1fr 1fr;
         gap: 8px;
-        margin-top: 4px;
+        margin-top: 8px;
+        padding-top: 12px;
+        border-top: 1px solid #333;
+        background-color: var(--panel-bg);
+        z-index: 15;
     }
 
     .btn {
